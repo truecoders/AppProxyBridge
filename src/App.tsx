@@ -36,7 +36,6 @@ import {
   IconPower,
   IconPlus,
   IconTrash,
-  IconNetwork,
   IconAlertCircle,
   IconCheck,
   IconActivity,
@@ -945,9 +944,7 @@ function App() {
         <Group h="100%" px="md" justify="space-between">
           <Group>
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-            <ThemeIcon size="lg" radius="md" variant="gradient" gradient={{ from: "violet", to: "cyan" }}>
-              <IconNetwork size={20} />
-            </ThemeIcon>
+            <img src="/icon.png" alt="AppProxyBridge Logo" style={{ width: 32, height: 32, objectFit: "contain" }} />
             <Title order={3} className="glow-purple" style={{ fontFamily: "Outfit, sans-serif", letterSpacing: "1px" }}>
               AppProxyBridge
             </Title>
