@@ -27,7 +27,6 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          target: x64
 
       - name: Install web dependencies
         run: npm install
