@@ -173,6 +173,7 @@ function App() {
   const [totalSent, setTotalSent] = useState<number>(0);
   const [totalReceived, setTotalReceived] = useState<number>(0);
   const [blockedCount, setBlockedCount] = useState<number>(0);
+  const [activeConnectionsCount, setActiveConnectionsCount] = useState<number>(0);
 
   // Per-process traffic from backend (polled from get_traffic_stats)
   const [processTraffic, setProcessTraffic] = useState<Record<string, { sent: number; recv: number; last_activity: number }>>({}); 
@@ -389,6 +390,7 @@ function App() {
     const fetchActive = async () => {
       try {
         const activeConns: ConnectionInfo[] = await invoke("get_active_connections");
+        setActiveConnectionsCount(activeConns.length);
         
         setConnections((prev) => {
           const diverts = prev.filter(
@@ -1027,7 +1029,7 @@ function App() {
                     АКТИВНЫЕ СОЕД.
                   </Text>
                   <Text fw={700} size="md" mt="4px">
-                    {connections.filter((c) => c.status === "Active" || c.status === "Proxied").length}
+                    {activeConnectionsCount}
                   </Text>
                 </Stack>
                 <ThemeIcon color="violet" variant="light" radius="md" size="md">

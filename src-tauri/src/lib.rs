@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::path::PathBuf;
 use tauri::{State, AppHandle, Manager};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
 use tauri::menu::{Menu, MenuItem};
 use proxy_core::{EngineState, ProxyConfig, Rule};
 
@@ -309,33 +309,40 @@ pub fn run() {
                 ],
             )?;
 
-            if let Some(icon) = app.default_window_icon() {
-                let _tray = TrayIconBuilder::new()
-                    .icon(icon.clone())
-                    .menu(&tray_menu)
-                    .on_menu_event(|app, event| match event.id.as_ref() {
-                        "show" => {
-                            if let Some(window) = app.webview_windows().values().next() {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+            let icon = match app.default_window_icon() {
+                Some(ic) => ic.clone(),
+                None => {
+                    let icon_bytes = include_bytes!("../icons/128x128.png");
+                    tauri::image::Image::from_bytes(icon_bytes)
+                        .unwrap_or_else(|_| tauri::image::Image::new(&[], 0, 0))
+                }
+            };
+
+            let _tray = TrayIconBuilder::new()
+                .icon(icon)
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.webview_windows().values().next() {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
-                        "quit" => {
-                            app.exit(0);
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.webview_windows().values().next() {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
-                        _ => {}
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click { .. } = event {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.webview_windows().values().next() {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    })
-                    .build(app)?;
-            }
+                    }
+                })
+                .build(app)?;
             
             app.manage(DbPath(db_path));
             Ok(())

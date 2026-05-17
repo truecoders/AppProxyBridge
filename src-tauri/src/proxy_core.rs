@@ -783,6 +783,6 @@ pub fn get_active_system_connections(state: &EngineState) -> Vec<ConnectionInfo>
     
     // Sort and limit
     connections.sort_by(|a, b| a.process_name.cmp(&b.process_name));
-    connections.truncate(200);
+    connections.truncate(1000);
     connections
 }
