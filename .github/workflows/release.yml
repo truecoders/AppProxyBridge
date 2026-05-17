@@ -1,0 +1,56 @@
+name: Release AppProxyBridge
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    name: Build & Publish Release (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x64
+
+      - name: Install web dependencies
+        run: npm install
+
+      - name: Build and Publish Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__ # Uses package.json version
+          releaseName: 'AppProxyBridge v__VERSION__'
+          releaseBody: |
+            🎉 Новый стабильный релиз AppProxyBridge v__VERSION__!
+            
+            ### 📦 Установка:
+            Скачайте прикрепленный установщик ниже:
+            - `.msi` — для стандартной тихой установки в систему.
+            - `-setup.exe` — для автономного мастера установки.
+            
+            ### 🚀 Что нового:
+            - Фирменная иконка в стиле параметров сети Windows 11.
+            - Попроцессная неоновая статистика сетевого трафика.
+            - Запуск в трее и автозагрузка.
+            - Быстрое и стабильное прозрачное проксирование.
+          releaseDraft: false
+          prerelease: false
