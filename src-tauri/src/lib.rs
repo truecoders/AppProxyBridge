@@ -304,7 +304,7 @@ pub fn run() {
             let tray_menu = Menu::with_items(
                 app,
                 &[
-                    &MenuItem::with_id(app, "show", "Показать Proxier", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "show", "Показать AppProxyBridge", true, None::<&str>)?,
                     &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
                 ],
             )?;

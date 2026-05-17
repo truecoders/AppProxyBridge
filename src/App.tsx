@@ -937,7 +937,7 @@ function App() {
               <IconNetwork size={20} />
             </ThemeIcon>
             <Title order={3} className="glow-purple" style={{ fontFamily: "Outfit, sans-serif", letterSpacing: "1px" }}>
-              PROXIER
+              AppProxyBridge
             </Title>
             <Badge color={isRunning ? "teal" : "red"} variant="light" size="lg" radius="sm">
               {isRunning ? "АКТИВЕН" : "ВЫКЛЮЧЕН"}
