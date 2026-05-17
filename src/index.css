@@ -1,0 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --font-sans: 'Plus Jakarta Sans', 'Outfit', system-ui, -apple-system, sans-serif;
+  
+  /* Color Palette - Premium Dark Mode */
+  --bg-gradient: radial-gradient(circle at 50% 0%, #151124 0%, #0d0a15 60%, #06050a 100%);
+  --glass-bg: rgba(22, 17, 34, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.05);
+  --glass-border-active: rgba(255, 255, 255, 0.15);
+  --accent-glow: 0 0 30px rgba(112, 79, 240, 0.15);
+  --neon-cyan: #00f2fe;
+  --neon-purple: #704ff0;
+  --neon-green: #39d353;
+  --neon-red: #ff4757;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background: var(--bg-gradient);
+  background-attachment: fixed;
+  color: #f1f1f6;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Glassmorphism Panel Utility */
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.glass-panel:hover {
+  border-color: var(--glass-border-active);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), var(--accent-glow);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(112, 79, 240, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(112, 79, 240, 0.6);
+}
+
+/* Neon Glows */
+.glow-cyan {
+  text-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+}
+
+.glow-purple {
+  text-shadow: 0 0 10px rgba(112, 79, 240, 0.5);
+}
+
+/* Smooth Transitions & Hover Effects */
+.interactive-element {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.interactive-element:hover {
+  transform: translateY(-2px);
+}
+
+.interactive-element:active {
+  transform: translateY(0);
+}
+
+/* Keyframe Animations */
+@keyframes pulseGlow {
+  0% { box-shadow: 0 0 15px rgba(112, 79, 240, 0.1); }
+  50% { box-shadow: 0 0 25px rgba(112, 79, 240, 0.3); }
+  100% { box-shadow: 0 0 15px rgba(112, 79, 240, 0.1); }
+}
+
+.pulse-card {
+  animation: pulseGlow 3s infinite ease-in-out;
+}
