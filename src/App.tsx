@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -181,7 +181,6 @@ function App() {
   const [procSearchQuery, setProcSearchQuery] = useState("");
   const [procSortBy, setProcSortBy] = useState<string>("name"); // "name" | "activity" | "time" (Default sorting: by name)
   const [procFilterAction, setProcFilterAction] = useState<string>("all"); // "all" | "proxy" | "direct" | "blocked"
-  const [orderedProcessNames, setOrderedProcessNames] = useState<string[]>([]);
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
   const [selectedProcessName, setSelectedProcessName] = useState<string | null>(null);
 
@@ -861,19 +860,29 @@ function App() {
     groupedConnections[conn.process_name].push(conn);
   });
 
-  // Filter and sort the process list via useEffect to avoid rapid flickering / sorting jumps during polling
-  useEffect(() => {
+  // Filter and sort the process list dynamically to keep it perfectly in sync with all live traffic and active rules
+  const sortedProcesses = useMemo(() => {
     const rawNames = Object.keys(groupedConnections);
-    const newOrder = [...rawNames]
+    return [...rawNames]
       .filter((procName) => procName.toLowerCase().includes(procSearchQuery.toLowerCase()))
       .filter((procName) => {
         const connsList = groupedConnections[procName] || [];
-        const isProxied = connsList.some((c) => c.action === "Proxy" || c.status === "Proxied");
-        const isBlocked = connsList.some((c) => c.action === "Block" || c.status === "Blocked");
+        
+        // A process is proxied if it has a proxy rule OR has any proxy connection
+        const activeRule = rules.find((r) => r.process_name.toLowerCase() === procName.toLowerCase());
+        const hasProxyRule = activeRule?.action === "Proxy";
+        const hasBlockRule = activeRule?.action === "Block";
+        
+        const hasProxyConn = connsList.some((c) => c.action === "Proxy" || c.status === "Proxied");
+        const hasBlockConn = connsList.some((c) => c.action === "Block" || c.status === "Blocked");
 
-        if (procFilterAction === "proxy") return isProxied;
-        if (procFilterAction === "direct") return !isProxied && !isBlocked;
-        if (procFilterAction === "blocked") return isBlocked;
+        if (procFilterAction === "proxy") return hasProxyRule || hasProxyConn;
+        if (procFilterAction === "blocked") return hasBlockRule || hasBlockConn;
+        if (procFilterAction === "direct") {
+          if (hasProxyRule || hasBlockRule) return false;
+          if (hasProxyConn || hasBlockConn) return false;
+          return true;
+        }
         return true;
       })
       .sort((a, b) => {
@@ -883,28 +892,29 @@ function App() {
         const isActiveA = (Date.now() - lastActA) <= 5000;
         const isActiveB = (Date.now() - lastActB) <= 5000;
 
+        // Keep active processes (activity within 5 seconds) always on top
         if (isActiveA && !isActiveB) return -1;
         if (!isActiveA && isActiveB) return 1;
 
+        // Within the active/inactive group, sort by the selected criteria
         if (procSortBy === "name") return a.localeCompare(b);
         if (procSortBy === "time") return lastActB - lastActA;
         
+        // Default sorting: "activity" (total traffic volume)
         const trafA = (processTraffic[a]?.sent || 0) + (processTraffic[a]?.recv || 0);
         const trafB = (processTraffic[b]?.sent || 0) + (processTraffic[b]?.recv || 0);
         return trafB - trafA;
-      });
-
-    setOrderedProcessNames(newOrder);
+      })
+      .slice(0, 100);
   }, [
-    connections.length,
-    Object.keys(processTraffic).join(","),
+    connections,
+    processTraffic,
+    rules,
     procSearchQuery,
     procFilterAction,
     procSortBy,
     refreshNonce
   ]);
-
-  const sortedProcesses = orderedProcessNames.slice(0, 30);
 
   return (
     <AppShell
