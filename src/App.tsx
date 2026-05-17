@@ -1238,6 +1238,32 @@ function App() {
                       const lastActivity = processTraffic[procName]?.last_activity || 0;
                       const isInactive = (Date.now() - lastActivity) > 5000;
 
+                      const isProxied = (activeRule?.action === "Proxy") || isProxiedProcess;
+                      const isBlocked = (activeRule?.action === "Block") || isBlockedProcess;
+
+                      let bg = "rgba(255, 255, 255, 0.01)";
+                      let border = "1px solid var(--glass-border)";
+                      let hoverBg = "rgba(255, 255, 255, 0.03)";
+                      let boxShadow = "none";
+
+                      if (isProxied) {
+                        bg = "rgba(12, 196, 178, 0.04)";
+                        border = "1px solid rgba(12, 196, 178, 0.2)";
+                        hoverBg = "rgba(12, 196, 178, 0.08)";
+                      } else if (isBlocked) {
+                        bg = "rgba(239, 68, 68, 0.04)";
+                        border = "1px solid rgba(239, 68, 68, 0.2)";
+                        hoverBg = "rgba(239, 68, 68, 0.08)";
+                      }
+
+                      // Highlight overrides
+                      if (highlightedProcesses[procName]) {
+                        bg = "rgba(124, 58, 237, 0.2)";
+                        border = "1px solid rgba(124, 58, 237, 0.5)";
+                        hoverBg = "rgba(124, 58, 237, 0.25)";
+                        boxShadow = "0 0 10px rgba(124, 58, 237, 0.25)";
+                      }
+
                       return (
                         <Paper
                           key={procName}
@@ -1247,25 +1273,19 @@ function App() {
                           style={{
                             cursor: "pointer",
                             transition: "all 0.15s ease",
-                            background: highlightedProcesses[procName]
-                              ? "rgba(124, 58, 237, 0.15)"
-                              : "rgba(255, 255, 255, 0.01)",
-                            border: highlightedProcesses[procName]
-                              ? "1px solid rgba(124, 58, 237, 0.4)"
-                              : "1px solid var(--glass-border)",
+                            background: bg,
+                            border: border,
                             opacity: isInactive ? 0.6 : 1,
                             filter: isInactive ? "grayscale(100%)" : "none",
-                            boxShadow: highlightedProcesses[procName]
-                              ? "0 0 10px rgba(124, 58, 237, 0.2)"
-                              : "none",
+                            boxShadow: boxShadow,
                           }}
                           onMouseEnter={(e) => {
-                            e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                            e.currentTarget.style.background = hoverBg;
+                            e.currentTarget.style.border = border;
                           }}
                           onMouseLeave={(e) => {
-                            e.currentTarget.style.background = highlightedProcesses[procName]
-                              ? "rgba(124, 58, 237, 0.15)"
-                              : "rgba(255, 255, 255, 0.01)";
+                            e.currentTarget.style.background = bg;
+                            e.currentTarget.style.border = border;
                           }}
                         >
                           <Group justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
@@ -1366,9 +1386,102 @@ function App() {
             const procName = selectedProcessName;
             const connsList = processConnHistory[procName] || [];
             const activeRule = rules.find((r) => r.process_name.toLowerCase() === procName.toLowerCase());
+            
+            // Total process traffic stats from global tracker
+            const stats = processTraffic[procName] || { sent: 0, recv: 0, last_activity: 0 };
+            const totalSentBytes = stats.sent;
+            const totalRecvBytes = stats.recv;
+            
+            const activeConns = connsList.filter(c => c.status !== "Closed").length;
+            const totalConns = connsList.length;
+            const isProcessActive = (Date.now() - stats.last_activity) <= 5000;
 
             return (
               <Stack gap="md">
+                {/* Real-time Traffic Metrics Cards */}
+                <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+                  {/* Sent Card */}
+                  <Paper
+                    p="sm"
+                    radius="md"
+                    style={{
+                      background: "rgba(12, 196, 178, 0.04)",
+                      border: "1px solid rgba(12, 196, 178, 0.15)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                    }}
+                  >
+                    <ThemeIcon color="teal" variant="light" size="lg" radius="md">
+                      <IconArrowUpRight size={20} />
+                    </ThemeIcon>
+                    <div>
+                      <Text size="xs" color="dimmed" fw={500}>ОТПРАВЛЕНО</Text>
+                      <Text size="md" fw={700} style={{ color: "#0cc4b2", fontFamily: "Outfit, sans-serif" }}>
+                        {formatBytes(totalSentBytes)}
+                      </Text>
+                    </div>
+                  </Paper>
+
+                  {/* Received Card */}
+                  <Paper
+                    p="sm"
+                    radius="md"
+                    style={{
+                      background: "rgba(124, 58, 237, 0.04)",
+                      border: "1px solid rgba(124, 58, 237, 0.15)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                    }}
+                  >
+                    <ThemeIcon color="violet" variant="light" size="lg" radius="md">
+                      <IconArrowDownLeft size={20} />
+                    </ThemeIcon>
+                    <div>
+                      <Text size="xs" color="dimmed" fw={500}>ПОЛУЧЕНО</Text>
+                      <Text size="md" fw={700} style={{ color: "#a78bfa", fontFamily: "Outfit, sans-serif" }}>
+                        {formatBytes(totalRecvBytes)}
+                      </Text>
+                    </div>
+                  </Paper>
+
+                  {/* Active Connections Card */}
+                  <Paper
+                    p="sm"
+                    radius="md"
+                    style={{
+                      background: "rgba(59, 130, 246, 0.04)",
+                      border: "1px solid rgba(59, 130, 246, 0.15)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                    }}
+                  >
+                    <ThemeIcon color="blue" variant="light" size="lg" radius="md">
+                      <IconActivity size={20} />
+                    </ThemeIcon>
+                    <div style={{ flex: 1 }}>
+                      <Group justify="space-between" align="center" wrap="nowrap">
+                        <div>
+                          <Text size="xs" color="dimmed" fw={500}>АКТИВНОСТЬ</Text>
+                          <Text size="sm" fw={700} style={{ color: "#60a5fa", fontFamily: "Outfit, sans-serif" }}>
+                            {activeConns} акт. / {totalConns} всего
+                          </Text>
+                        </div>
+                        <Badge
+                          color={isProcessActive ? "teal" : "gray"}
+                          variant="dot"
+                          size="sm"
+                          style={{ textTransform: "none" }}
+                        >
+                          {isProcessActive ? "Активен" : "Сон"}
+                        </Badge>
+                      </Group>
+                    </div>
+                  </Paper>
+                </SimpleGrid>
+
                 {/* Quick routing rules panel */}
                 <Paper
                   p="md"
