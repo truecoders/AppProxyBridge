@@ -451,6 +451,9 @@ fn process_diverted_packet_sync(
             // Set impostor to true so this packet is ignored by WinDivert after reinjection
             packet.address.set_impostor(true);
             
+            // Set outbound to false because this is now an inbound reply packet
+            packet.address.set_outbound(false);
+            
             // Rewrite Source IP to orig_dest_addr.ip()
             match orig_dest_addr.ip() {
                 IpAddr::V4(ipv4) => {
@@ -470,15 +473,8 @@ fn process_diverted_packet_sync(
             packet_data[src_port_offset] = port_bytes[0];
             packet_data[src_port_offset + 1] = port_bytes[1];
             
-            // Recalculate checksums
-            unsafe {
-                windivert_sys::WinDivertHelperCalcChecksums(
-                    packet_data.as_mut_ptr() as *mut std::ffi::c_void,
-                    packet_data.len() as u32,
-                    std::ptr::null_mut(),
-                    windivert_sys::ChecksumFlags::new(),
-                );
-            }
+            // Recalculate checksums and update address checksum flags
+            let _ = packet.recalculate_checksums(windivert_sys::ChecksumFlags::new());
             
             return Ok(());
         }
@@ -639,15 +635,8 @@ fn process_diverted_packet_sync(
                 }
             };
             
-            // Recalculate checksums after modifying packet headers
-            unsafe {
-                windivert_sys::WinDivertHelperCalcChecksums(
-                    packet_data.as_mut_ptr() as *mut std::ffi::c_void,
-                    packet_data.len() as u32,
-                    std::ptr::null_mut(),
-                    windivert_sys::ChecksumFlags::new(),
-                );
-            }
+            // Recalculate checksums after modifying packet headers and update address checksum flags
+            let _ = packet.recalculate_checksums(windivert_sys::ChecksumFlags::new());
             
             let _ = state.event_sender.send(connection_event.clone());
             let _ = app.emit("connection-event", connection_event);
