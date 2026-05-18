@@ -319,7 +319,7 @@ fn get_process_name_for_pid(pid: u32) -> String {
 
 // Main packet process thread runner (synchronously opens handle, asynchronously processes)
 pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle) -> Result<(), String> {
-    let filter = "(outbound or inbound) and (tcp or udp)";
+    let filter = "(outbound or inbound) and (tcp or udp) and !impostor";
     let handle = match WinDivert::<NetworkLayer>::network(filter, 0, WinDivertFlags::default()) {
         Ok(h) => h,
         Err(e) => {
@@ -448,6 +448,9 @@ fn process_diverted_packet_sync(
         };
         
         if let Some((orig_dest_addr, _proxy_id)) = mapping {
+            // Set impostor to true so this packet is ignored by WinDivert after reinjection
+            packet.address.set_impostor(true);
+            
             // Rewrite Source IP to orig_dest_addr.ip()
             match orig_dest_addr.ip() {
                 IpAddr::V4(ipv4) => {
@@ -585,6 +588,9 @@ fn process_diverted_packet_sync(
             let _ = app.emit("connection-event", connection_event);
         }
         RuleAction::Proxy => {
+            // Set impostor to true so this packet is ignored by WinDivert after reinjection
+            packet.address.set_impostor(true);
+            
             let local_relay_port: u16 = if is_tcp { 34010 } else { 34011 };
             
             // Resolve final proxy config matching matched_proxy_id or falling back to primary proxy
