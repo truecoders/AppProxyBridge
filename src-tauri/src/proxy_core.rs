@@ -319,7 +319,7 @@ fn get_process_name_for_pid(pid: u32) -> String {
 
 // Main packet process thread runner (synchronously opens handle, asynchronously processes)
 pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle) -> Result<(), String> {
-    let filter = "(outbound or inbound) and (tcp or udp) and !loopback";
+    let filter = "(outbound or inbound) and (tcp or udp)";
     let handle = match WinDivert::<NetworkLayer>::network(filter, 0, WinDivertFlags::default()) {
         Ok(h) => h,
         Err(e) => {
@@ -438,6 +438,54 @@ fn process_diverted_packet_sync(
     let src_port = u16::from_be_bytes([packet_data[src_port_offset], packet_data[src_port_offset + 1]]);
     let dest_port = u16::from_be_bytes([packet_data[dest_port_offset], packet_data[dest_port_offset + 1]]);
     
+    let local_relay_port: u16 = if is_tcp { 34010 } else { 34011 };
+
+    // --- REVERSE NAT FOR INBOUND PACKETS FROM OUR RELAY ---
+    if src_port == local_relay_port {
+        let mapping = {
+            let redirect_table = state.redirect_table.blocking_lock();
+            redirect_table.get(&dest_port).cloned()
+        };
+        
+        if let Some((orig_dest_addr, _proxy_id)) = mapping {
+            // Rewrite Source IP to orig_dest_addr.ip()
+            match orig_dest_addr.ip() {
+                IpAddr::V4(ipv4) => {
+                    let octets = ipv4.octets();
+                    packet_data[12] = octets[0];
+                    packet_data[13] = octets[1];
+                    packet_data[14] = octets[2];
+                    packet_data[15] = octets[3];
+                }
+                IpAddr::V6(ipv6) => {
+                    let octets = ipv6.octets();
+                    packet_data[8..24].copy_from_slice(&octets);
+                }
+            }
+            // Rewrite Source Port to orig_dest_addr.port()
+            let port_bytes = orig_dest_addr.port().to_be_bytes();
+            packet_data[src_port_offset] = port_bytes[0];
+            packet_data[src_port_offset + 1] = port_bytes[1];
+            
+            // Recalculate checksums
+            unsafe {
+                windivert_sys::WinDivertHelperCalcChecksums(
+                    packet_data.as_mut_ptr() as *mut std::ffi::c_void,
+                    packet_data.len() as u32,
+                    std::ptr::null_mut(),
+                    windivert_sys::ChecksumFlags::new(),
+                );
+            }
+            
+            return Ok(());
+        }
+    }
+    
+    // --- PREVENT INFINITE LOOP FOR RELAY TRAFFIC ---
+    if dest_port == local_relay_port {
+        return Ok(());
+    }
+
     let is_inbound = !packet.address.outbound();
     if is_inbound {
         // Best-effort: try to resolve process for inbound packets and accumulate bytes_received
@@ -456,9 +504,11 @@ fn process_diverted_packet_sync(
     // 2. Resolve process name (sync version)
     let (pid, process_name) = resolve_process_for_port_sync(src_port, is_tcp, &state);
     
-    if process_name == "Unknown" {
+    let process_lower = process_name.to_lowercase();
+    if process_name == "Unknown" || process_lower.contains("appproxybridge") || process_lower.contains("proxier") {
         return Ok(());
     }
+    
     
     // 3. Match rules
     let mut matching_action = RuleAction::Direct;
