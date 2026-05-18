@@ -578,6 +578,16 @@ fn process_diverted_packet_sync(
                 }
             };
             
+            // Recalculate checksums after modifying packet headers
+            unsafe {
+                windivert_sys::WinDivertHelperCalcChecksums(
+                    packet_data.as_mut_ptr() as *mut std::ffi::c_void,
+                    packet_data.len() as u32,
+                    std::ptr::null_mut(),
+                    windivert_sys::ChecksumFlags::new(),
+                );
+            }
+            
             let _ = state.event_sender.send(connection_event.clone());
             let _ = app.emit("connection-event", connection_event);
         }
