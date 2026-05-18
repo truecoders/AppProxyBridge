@@ -544,6 +544,11 @@ fn process_diverted_packet_sync(
         }
     }
     
+    // Loopback bypass: node-local loopback traffic must never be proxied (avoids routing loops)
+    if dest_ip.is_loopback() {
+        matching_action = RuleAction::Direct;
+    }
+    
     // Local / Intranet Bypass override
     if state.bypass_local.load(Ordering::Relaxed) && is_local_ip(dest_ip) {
         matching_action = RuleAction::Direct;
