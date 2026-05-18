@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use rusqlite::{Connection, Result};
 use crate::proxy_core::{ProxyConfig, Rule};
 
@@ -75,7 +77,7 @@ pub fn init_db(db_path: PathBuf) -> Result<Connection> {
     Ok(conn)
 }
 
-// Helper to set/remove Windows registry autostart key
+// Helper to set/remove Windows autostart using Task Scheduler (necessary to bypass UAC block for elevated apps)
 pub fn set_autostart(enabled: bool) -> Result<(), rusqlite::Error> {
     let current_exe = match std::env::current_exe() {
         Ok(path) => path,
@@ -83,27 +85,64 @@ pub fn set_autostart(enabled: bool) -> Result<(), rusqlite::Error> {
     };
     let exe_path = current_exe.to_string_lossy().to_string();
 
+    #[cfg(target_os = "windows")]
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // 1. Clean up legacy registry keys that are blocked by UAC anyway
+    let mut reg_cmd = std::process::Command::new("reg");
+    #[cfg(target_os = "windows")]
+    reg_cmd.creation_flags(CREATE_NO_WINDOW);
+    let _ = reg_cmd
+        .args(&[
+            "delete",
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "/v",
+            "Proxier",
+            "/f"
+        ])
+        .status();
+
+    let mut reg_cmd2 = std::process::Command::new("reg");
+    #[cfg(target_os = "windows")]
+    reg_cmd2.creation_flags(CREATE_NO_WINDOW);
+    let _ = reg_cmd2
+        .args(&[
+            "delete",
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "/v",
+            "AppProxyBridge",
+            "/f"
+        ])
+        .status();
+
+    // 2. Manage Task Scheduler task
     if enabled {
-        let _ = std::process::Command::new("reg")
+        let mut sch_cmd = std::process::Command::new("schtasks");
+        #[cfg(target_os = "windows")]
+        sch_cmd.creation_flags(CREATE_NO_WINDOW);
+        let _ = sch_cmd
             .args(&[
-                "add",
-                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                "/v",
-                "Proxier",
-                "/t",
-                "REG_SZ",
-                "/d",
+                "/create",
+                "/tn",
+                "AppProxyBridge",
+                "/tr",
                 &format!("\"{}\"", exe_path),
+                "/sc",
+                "onlogon",
+                "/rl",
+                "highest",
                 "/f"
             ])
             .status();
     } else {
-        let _ = std::process::Command::new("reg")
+        let mut sch_cmd = std::process::Command::new("schtasks");
+        #[cfg(target_os = "windows")]
+        sch_cmd.creation_flags(CREATE_NO_WINDOW);
+        let _ = sch_cmd
             .args(&[
-                "delete",
-                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                "/v",
-                "Proxier",
+                "/delete",
+                "/tn",
+                "AppProxyBridge",
                 "/f"
             ])
             .status();

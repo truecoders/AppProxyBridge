@@ -919,6 +919,7 @@ function App() {
 
   return (
     <AppShell
+      layout="alt"
       header={{ height: 60 }}
       navbar={{
         width: 260,
