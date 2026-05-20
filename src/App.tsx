@@ -48,7 +48,6 @@ import {
   IconRefresh,
   IconTerminal2,
   IconRoute,
-  IconHandStop,
   IconLock,
   IconSparkles,
   IconChevronDown,
