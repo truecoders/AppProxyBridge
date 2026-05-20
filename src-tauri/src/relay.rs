@@ -11,12 +11,10 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
     let listener = match TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("Failed to bind TCP relay listener to {}: {:?}", addr, e);
+            eprintln!("CRITICAL: Failed to bind TCP relay listener to {}: {:?}", addr, e);
             return;
         }
     };
-    
-    println!("TCP Relay listening on {}", addr);
     
     while running.load(std::sync::atomic::Ordering::Relaxed) {
         let (mut client_socket, client_addr) = match listener.accept().await {
@@ -30,7 +28,6 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
         tokio::spawn(async move {
             // Find original destination and proxy ID for this port
             let client_port = client_addr.port();
-            crate::proxy_core::debug_log(&format!("RELAY: Accepted TCP connection from {}. Client port: {}", client_addr, client_port));
             
             let mapping = {
                 let redirect_table = state_clone.redirect_table.lock().await;
@@ -38,7 +35,6 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
             };
             
             if let Some((dest_addr, proxy_id)) = mapping {
-                crate::proxy_core::debug_log(&format!("RELAY: Found mapping for client port {}: dest_addr={}, proxy_id={}", client_port, dest_addr, proxy_id));
                 
                 // Find matching proxy configuration in the pool
                 let proxy_config = {
@@ -61,17 +57,12 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
                 if let Some(cfg) = proxy_config {
                     // Tunnel traffic to Upstream Proxy
                     let proxy_addr = format!("{}:{}", cfg.host, cfg.port);
-                    crate::proxy_core::debug_log(&format!("RELAY: Connecting to upstream proxy {} [{}] for {}", proxy_addr, cfg.name, connection_id));
                     match TcpStream::connect(&proxy_addr).await {
                         Ok(mut proxy_socket) => {
-                            crate::proxy_core::debug_log(&format!("RELAY: Connected to upstream proxy [{}] for {}. Performing handshake...", cfg.name, connection_id));
-                            println!("Connected to upstream proxy [{}] for {}", cfg.name, connection_id);
                             
                             // Perform SOCKS5 or HTTP CONNECT handshake
                             match perform_proxy_handshake(&mut proxy_socket, &cfg, dest_addr).await {
                                 Ok(()) => {
-                                    crate::proxy_core::debug_log(&format!("RELAY: Handshake successful, tunneling traffic for {}", connection_id));
-                                    println!("Handshake successful, tunneling traffic to [{}] for {}", cfg.name, connection_id);
                                     
                                     // Send event to UI that the connection is now fully proxied
                                     let mut conn_event = crate::proxy_core::ConnectionInfo {
@@ -92,23 +83,19 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
                                     // Establish pipe
                                     match copy_bidirectional(&mut client_socket, &mut proxy_socket).await {
                                         Ok((sent, received)) => {
-                                            crate::proxy_core::debug_log(&format!("RELAY: Tunnel closed normally for {}. Sent: {}, Recv: {}", connection_id, sent, received));
                                             conn_event.bytes_sent = sent;
                                             conn_event.bytes_received = received;
                                             conn_event.status = "Closed".to_string();
                                             let _ = app_clone.emit("connection-event", conn_event);
                                         }
-                                        Err(e) => {
-                                            crate::proxy_core::debug_log(&format!("RELAY ERROR: Tunnel bidirectional copy error for {}: {:?}", connection_id, e));
-                                            eprintln!("Tunnel bidirectional copy error: {:?}", e);
+                                        Err(_e) => {
                                             conn_event.status = "Closed".to_string();
                                             let _ = app_clone.emit("connection-event", conn_event);
                                         }
                                     }
                                 }
                                 Err(handshake_err) => {
-                                    crate::proxy_core::debug_log(&format!("RELAY ERROR: Handshake failed for {}: {:?}", connection_id, handshake_err));
-                                    eprintln!("Proxy handshake failed for upstream {}: {:?}", proxy_addr, handshake_err);
+                                    eprintln!("CRITICAL: Proxy handshake failed for upstream {}: {:?}", proxy_addr, handshake_err);
                                     // Emit closed event on handshake failure
                                     let conn_event = crate::proxy_core::ConnectionInfo {
                                         id: connection_id.clone(),
@@ -128,8 +115,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
                             }
                         }
                         Err(e) => {
-                            crate::proxy_core::debug_log(&format!("RELAY ERROR: Failed to connect to upstream proxy at {}: {:?}", proxy_addr, e));
-                            eprintln!("Failed to connect to upstream proxy at {}: {:?}", proxy_addr, e);
+                            eprintln!("CRITICAL: Failed to connect to upstream proxy at {}: {:?}", proxy_addr, e);
                             // Emit closed event
                             let conn_event = crate::proxy_core::ConnectionInfo {
                                 id: connection_id.clone(),
@@ -148,7 +134,6 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
                         }
                     }
                 } else {
-                    crate::proxy_core::debug_log(&format!("RELAY ERROR: No proxy config found matching proxy_id={}", proxy_id));
                     // No proxy configured / not found, direct fallback
                     match TcpStream::connect(dest_addr).await {
                         Ok(mut dest_socket) => {
@@ -174,8 +159,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
                                     conn_event.status = "Closed".to_string();
                                     let _ = app_clone.emit("connection-event", conn_event);
                                 }
-                                Err(e) => {
-                                    eprintln!("Direct fallback copy error: {:?}", e);
+                                Err(_e) => {
                                     conn_event.status = "Closed".to_string();
                                     let _ = app_clone.emit("connection-event", conn_event);
                                 }
@@ -194,8 +178,8 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
 pub async fn start_udp_relay(state: Arc<EngineState>, _app: AppHandle) {
     // SOCKS5 UDP Associate relay implementation structure
     let running = state.running.clone();
-    let addr = "0.0.0.0:34021";
-    println!("UDP Relay listening on {}", addr);
+    let _addr = "0.0.0.0:34021";
+
     
     // In a real SOCKS5 UDP setup, this would bind a UdpSocket,
     // intercept UDP packets, wrap them in SOCKS5 UDP headers,

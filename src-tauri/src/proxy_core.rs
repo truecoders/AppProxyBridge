@@ -24,17 +24,7 @@ use windivert::packet::WinDivertPacket;
 
 type BOOL = i32;
 
-pub fn debug_log(msg: &str) {
-    println!("{}", msg);
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("c:\\Users\\mrjoh\\YandexDisk\\JOB\\PROJECTS\\proxier\\src-tauri\\debug.log")
-    {
-        use std::io::Write;
-        let _ = writeln!(file, "[{}] {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(), msg);
-    }
-}
+
 
 // Define structure for network connection events streamed to the UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,14 +444,12 @@ fn process_diverted_packet_sync(
 
     // --- REVERSE NAT FOR OUTBOUND PACKETS FROM OUR RELAY (REFLECTION) ---
     if src_port == local_relay_port && packet.address.outbound() {
-        debug_log(&format!("REVERSE NAT (Reflection): packet from relay port {} to client port {}.", src_port, dest_port));
         let mapping = {
             let redirect_table = state.redirect_table.blocking_lock();
             redirect_table.get(&dest_port).cloned()
         };
         
         if let Some((orig_dest_addr, _proxy_id)) = mapping {
-            debug_log(&format!("REVERSE NAT matching mapping found: rewriting source to {}", orig_dest_addr));
             // Set impostor to true so this packet is ignored by WinDivert after reinjection
             packet.address.set_impostor(true);
             
@@ -616,7 +604,7 @@ fn process_diverted_packet_sync(
             let _ = app.emit("connection-event", connection_event);
         }
         RuleAction::Proxy => {
-            debug_log(&format!("OUTBOUND MATCH: process {} (PID {}) matching Proxy. SrcPort: {}, Dest: {}:{}. Redirecting to local_relay_port: {}", process_name, pid, src_port, dest_ip, dest_port, local_relay_port));
+
             // Set impostor to true so this packet is ignored by WinDivert after reinjection
             packet.address.set_impostor(true);
             

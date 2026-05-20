@@ -25,3 +25,7 @@ dist-ssr
 
 # Development scratch files
 scratch/
+
+# Tauri debug logs
+src-tauri/debug.log
+src-tauri/target/
