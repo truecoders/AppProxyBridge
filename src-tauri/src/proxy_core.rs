@@ -24,6 +24,18 @@ use windivert::packet::WinDivertPacket;
 
 type BOOL = i32;
 
+pub fn debug_log(msg: &str) {
+    println!("{}", msg);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("c:\\Users\\mrjoh\\YandexDisk\\JOB\\PROJECTS\\proxier\\src-tauri\\debug.log")
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "[{}] {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(), msg);
+    }
+}
+
 // Define structure for network connection events streamed to the UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionInfo {
@@ -320,7 +332,7 @@ fn get_process_name_for_pid(pid: u32) -> String {
 // Main packet process thread runner (synchronously opens handle, asynchronously processes)
 pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle) -> Result<(), String> {
     let filter = "(outbound or inbound) and (tcp or udp) and !impostor";
-    let handle = match WinDivert::<NetworkLayer>::network(filter, 0, WinDivertFlags::default()) {
+    let handle = match WinDivert::<NetworkLayer>::network(filter, 1000, WinDivertFlags::default()) {
         Ok(h) => h,
         Err(e) => {
             return Err(format!("Не удалось запустить драйвер WinDivert (требуются права администратора): {:?}", e));
@@ -438,40 +450,54 @@ fn process_diverted_packet_sync(
     let src_port = u16::from_be_bytes([packet_data[src_port_offset], packet_data[src_port_offset + 1]]);
     let dest_port = u16::from_be_bytes([packet_data[dest_port_offset], packet_data[dest_port_offset + 1]]);
     
-    let local_relay_port: u16 = if is_tcp { 34010 } else { 34011 };
+    let local_relay_port: u16 = if is_tcp { 34020 } else { 34021 };
 
-    // --- REVERSE NAT FOR INBOUND PACKETS FROM OUR RELAY ---
-    if src_port == local_relay_port {
+    // --- REVERSE NAT FOR OUTBOUND PACKETS FROM OUR RELAY (REFLECTION) ---
+    if src_port == local_relay_port && packet.address.outbound() {
+        debug_log(&format!("REVERSE NAT (Reflection): packet from relay port {} to client port {}.", src_port, dest_port));
         let mapping = {
             let redirect_table = state.redirect_table.blocking_lock();
             redirect_table.get(&dest_port).cloned()
         };
         
         if let Some((orig_dest_addr, _proxy_id)) = mapping {
+            debug_log(&format!("REVERSE NAT matching mapping found: rewriting source to {}", orig_dest_addr));
             // Set impostor to true so this packet is ignored by WinDivert after reinjection
             packet.address.set_impostor(true);
             
             // Set outbound to false because this is now an inbound reply packet
             packet.address.set_outbound(false);
             
-            // Rewrite Source IP to orig_dest_addr.ip()
-            match orig_dest_addr.ip() {
-                IpAddr::V4(ipv4) => {
-                    let octets = ipv4.octets();
-                    packet_data[12] = octets[0];
-                    packet_data[13] = octets[1];
-                    packet_data[14] = octets[2];
-                    packet_data[15] = octets[3];
-                }
-                IpAddr::V6(ipv6) => {
-                    let octets = ipv6.octets();
-                    packet_data[8..24].copy_from_slice(&octets);
-                }
-            }
-            // Rewrite Source Port to orig_dest_addr.port()
+            // Rewrite Source Port to original destination port (e.g. 80 or 443)
             let port_bytes = orig_dest_addr.port().to_be_bytes();
             packet_data[src_port_offset] = port_bytes[0];
             packet_data[src_port_offset + 1] = port_bytes[1];
+            
+            // Swap Source IP and Destination IP
+            match orig_dest_addr.ip() {
+                IpAddr::V4(_) => {
+                    let src_ip_bytes = [packet_data[12], packet_data[13], packet_data[14], packet_data[15]];
+                    let dst_ip_bytes = [packet_data[16], packet_data[17], packet_data[18], packet_data[19]];
+                    packet_data[12..16].copy_from_slice(&dst_ip_bytes);
+                    packet_data[16..20].copy_from_slice(&src_ip_bytes);
+                }
+                IpAddr::V6(_) => {
+                    let src_ip_bytes = [
+                        packet_data[8], packet_data[9], packet_data[10], packet_data[11],
+                        packet_data[12], packet_data[13], packet_data[14], packet_data[15],
+                        packet_data[16], packet_data[17], packet_data[18], packet_data[19],
+                        packet_data[20], packet_data[21], packet_data[22], packet_data[23]
+                    ];
+                    let dst_ip_bytes = [
+                        packet_data[24], packet_data[25], packet_data[26], packet_data[27],
+                        packet_data[28], packet_data[29], packet_data[30], packet_data[31],
+                        packet_data[32], packet_data[33], packet_data[34], packet_data[35],
+                        packet_data[36], packet_data[37], packet_data[38], packet_data[39]
+                    ];
+                    packet_data[8..24].copy_from_slice(&dst_ip_bytes);
+                    packet_data[24..40].copy_from_slice(&src_ip_bytes);
+                }
+            }
             
             // Recalculate checksums and update address checksum flags
             let _ = packet.recalculate_checksums(windivert_sys::ChecksumFlags::new());
@@ -589,10 +615,11 @@ fn process_diverted_packet_sync(
             let _ = app.emit("connection-event", connection_event);
         }
         RuleAction::Proxy => {
+            debug_log(&format!("OUTBOUND MATCH: process {} (PID {}) matching Proxy. SrcPort: {}, Dest: {}:{}. Redirecting to local_relay_port: {}", process_name, pid, src_port, dest_ip, dest_port, local_relay_port));
             // Set impostor to true so this packet is ignored by WinDivert after reinjection
             packet.address.set_impostor(true);
             
-            let local_relay_port: u16 = if is_tcp { 34010 } else { 34011 };
+            let local_relay_port: u16 = if is_tcp { 34020 } else { 34021 };
             
             // Resolve final proxy config matching matched_proxy_id or falling back to primary proxy
             let proxy_id = {
@@ -615,26 +642,39 @@ fn process_diverted_packet_sync(
                 redirect_table.insert(src_port, (SocketAddr::new(dest_ip, dest_port), proxy_id));
             }
             
-            // Rewrite destination address
+            // Rewrite Destination Port to local_relay_port
+            let port_bytes = local_relay_port.to_be_bytes();
+            packet_data[dest_port_offset] = port_bytes[0];
+            packet_data[dest_port_offset + 1] = port_bytes[1];
+
+            // Reflect: Swap Source IP and Destination IP
             match dest_ip {
                 IpAddr::V4(_) => {
-                    packet_data[16] = 127;
-                    packet_data[17] = 0;
-                    packet_data[18] = 0;
-                    packet_data[19] = 1;
-                    
-                    let port_bytes = local_relay_port.to_be_bytes();
-                    packet_data[dest_port_offset] = port_bytes[0];
-                    packet_data[dest_port_offset + 1] = port_bytes[1];
+                    let src_ip_bytes = [packet_data[12], packet_data[13], packet_data[14], packet_data[15]];
+                    let dst_ip_bytes = [packet_data[16], packet_data[17], packet_data[18], packet_data[19]];
+                    packet_data[12..16].copy_from_slice(&dst_ip_bytes);
+                    packet_data[16..20].copy_from_slice(&src_ip_bytes);
                 }
                 IpAddr::V6(_) => {
-                    packet_data[24..40].copy_from_slice(&[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]);
-                    let port_bytes = local_relay_port.to_be_bytes();
-                    packet_data[dest_port_offset] = port_bytes[0];
-                    packet_data[dest_port_offset + 1] = port_bytes[1];
+                    let src_ip_bytes = [
+                        packet_data[8], packet_data[9], packet_data[10], packet_data[11],
+                        packet_data[12], packet_data[13], packet_data[14], packet_data[15],
+                        packet_data[16], packet_data[17], packet_data[18], packet_data[19],
+                        packet_data[20], packet_data[21], packet_data[22], packet_data[23]
+                    ];
+                    let dst_ip_bytes = [
+                        packet_data[24], packet_data[25], packet_data[26], packet_data[27],
+                        packet_data[28], packet_data[29], packet_data[30], packet_data[31],
+                        packet_data[32], packet_data[33], packet_data[34], packet_data[35],
+                        packet_data[36], packet_data[37], packet_data[38], packet_data[39]
+                    ];
+                    packet_data[8..24].copy_from_slice(&dst_ip_bytes);
+                    packet_data[24..40].copy_from_slice(&src_ip_bytes);
                 }
             };
             
+            packet.address.set_outbound(false);
+
             // Recalculate checksums after modifying packet headers and update address checksum flags
             let _ = packet.recalculate_checksums(windivert_sys::ChecksumFlags::new());
             
