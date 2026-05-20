@@ -515,7 +515,8 @@ fn process_diverted_packet_sync(
     if is_inbound {
         // Best-effort: try to resolve process for inbound packets and accumulate bytes_received
         let (pid, process_name) = resolve_process_for_port_sync(dest_port, is_tcp, &state);
-        if pid > 0 && process_name != "Unknown" {
+        let process_lower = process_name.to_lowercase();
+        if pid > 0 && process_name != "Unknown" && !process_lower.contains("appproxybridge") && !process_lower.contains("proxier") {
             let packet_len = packet_data.len() as u64;
             let current_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
             let mut stats = state.traffic_stats.lock().unwrap_or_else(|e| e.into_inner());
