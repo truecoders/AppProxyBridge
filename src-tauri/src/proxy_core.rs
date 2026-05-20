@@ -24,6 +24,24 @@ use windivert::packet::WinDivertPacket;
 
 type BOOL = i32;
 
+// Known process with assigned group action (persisted in DB)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnownProcess {
+    pub process_name: String,
+    pub group_action: String, // "new", "proxy", "direct", "block"
+    pub proxy_id: Option<String>,
+    pub created_at: u64,
+}
+
+// Application log entry (persisted in DB, last 300 entries)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub id: i64,
+    pub timestamp: u64,
+    pub level: String,   // "error", "warn", "info"
+    pub source: String,  // "relay", "windivert", "engine", "system"
+    pub message: String,
+}
 
 
 // Define structure for network connection events streamed to the UI
@@ -320,7 +338,7 @@ fn get_process_name_for_pid(pid: u32) -> String {
 }
 
 // Main packet process thread runner (synchronously opens handle, asynchronously processes)
-pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle) -> Result<(), String> {
+pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: std::path::PathBuf) -> Result<(), String> {
     let filter = "(outbound or inbound) and (tcp or udp) and !impostor";
     let handle = match WinDivert::<NetworkLayer>::network(filter, 1000, WinDivertFlags::default()) {
         Ok(h) => h,
@@ -342,16 +360,49 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle) -> Result<(
                 Ok(mut packet) => {
                     // Process the packet
                     if let Err(e) = process_diverted_packet_sync(&mut packet, state_clone.clone(), app_clone.clone()) {
-                        eprintln!("Error processing packet: {:?}", e);
+                        let msg = format!("Error processing packet: {:?}", e);
+                        if let Ok(conn) = crate::database::init_db(db_path.clone()) {
+                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg);
+                        }
+                        let log_entry = LogEntry {
+                            id: 0,
+                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                            level: "error".to_string(),
+                            source: "windivert".to_string(),
+                            message: msg,
+                        };
+                        let _ = app_clone.emit("log-event", log_entry);
                     }
                     
                     // Re-inject the packet (modified or unmodified)
                     if let Err(e) = handle.send(&packet) {
-                        eprintln!("WinDivert send error: {:?}", e);
+                        let msg = format!("WinDivert send error: {:?}", e);
+                        if let Ok(conn) = crate::database::init_db(db_path.clone()) {
+                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg);
+                        }
+                        let log_entry = LogEntry {
+                            id: 0,
+                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                            level: "error".to_string(),
+                            source: "windivert".to_string(),
+                            message: msg,
+                        };
+                        let _ = app_clone.emit("log-event", log_entry);
                     }
                 }
                 Err(e) => {
-                    eprintln!("WinDivert recv error: {:?}", e);
+                    let msg = format!("WinDivert recv error: {:?}", e);
+                    if let Ok(conn) = crate::database::init_db(db_path.clone()) {
+                        let _ = crate::database::insert_log(&conn, "error", "windivert", &msg);
+                    }
+                    let log_entry = LogEntry {
+                        id: 0,
+                        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                        level: "error".to_string(),
+                        source: "windivert".to_string(),
+                        message: msg,
+                    };
+                    let _ = app_clone.emit("log-event", log_entry);
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
             }

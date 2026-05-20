@@ -46,6 +46,14 @@ import {
   IconCopy,
   IconSearch,
   IconRefresh,
+  IconTerminal2,
+  IconRoute,
+  IconHandStop,
+  IconLock,
+  IconSparkles,
+  IconChevronDown,
+  IconChevronRight,
+  IconClearAll,
 } from "@tabler/icons-react";
 
 // Types matching Rust model
@@ -89,6 +97,21 @@ interface SavedData {
   autostart: boolean;
   minimize_to_tray: boolean;
   start_minimized: boolean;
+}
+
+interface KnownProcess {
+  process_name: string;
+  group_action: "new" | "proxy" | "direct" | "block";
+  proxy_id?: string;
+  created_at: number;
+}
+
+interface LogEntry {
+  id: number;
+  timestamp: number;
+  level: string;
+  source: string;
+  message: string;
 }
 
 function formatConnectionTime(timestampMs: number): string {
@@ -183,6 +206,15 @@ function App() {
   const [procFilterAction, setProcFilterAction] = useState<string>("all"); // "all" | "proxy" | "direct" | "blocked"
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
   const [selectedProcessName, setSelectedProcessName] = useState<string | null>(null);
+
+  // Known processes from DB (grouping state)
+  const [knownProcesses, setKnownProcesses] = useState<KnownProcess[]>([]);
+
+  // Application logs state
+  const [appLogs, setAppLogs] = useState<LogEntry[]>([]);
+
+  // Dashboard group sections collapsed state
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   // Stable connection history per process name (up to 100 per process)
   const [processConnHistory, setProcessConnHistory] = useState<Record<string, ConnectionInfo[]>>({});
@@ -290,6 +322,18 @@ function App() {
         setMinimizeToTray(data.minimize_to_tray);
         setStartMinimized(data.start_minimized);
 
+        // Load known processes grouping
+        try {
+          const kp: KnownProcess[] = await invoke("get_known_processes");
+          setKnownProcesses(kp);
+        } catch (_) {}
+
+        // Load initial app logs from DB
+        try {
+          const logs: LogEntry[] = await invoke("get_app_logs");
+          setAppLogs(logs);
+        } catch (_) {}
+
         // Auto-start engine if there is at least one proxy added and not already running
         const alreadyRunning: boolean = await invoke("is_engine_running");
         setIsRunning(alreadyRunning);
@@ -378,10 +422,35 @@ function App() {
       unlistenFn = fn;
     });
 
+    // Listen for log events from backend (real-time, no polling)
+    let unlistenLogFn: (() => void) | null = null;
+    const setupLogListener = async () => {
+      const unlisten = await listen<LogEntry>("log-event", (event) => {
+        setAppLogs((prev) => [event.payload, ...prev].slice(0, 300));
+      });
+      return unlisten;
+    };
+    setupLogListener().then((fn) => {
+      unlistenLogFn = fn;
+    });
+
     return () => {
       if (unlistenFn) unlistenFn();
+      if (unlistenLogFn) unlistenLogFn();
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
+  }, []);
+
+  // Poll known processes periodically to pick up auto-discovered processes
+  useEffect(() => {
+    const fetchKnown = async () => {
+      try {
+        const kp: KnownProcess[] = await invoke("get_known_processes");
+        setKnownProcesses(kp);
+      } catch (_) {}
+    };
+    const interval = setInterval(fetchKnown, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Poll active system connections dynamically (TCP/UDP live monitor)
@@ -832,6 +901,47 @@ function App() {
     }
   };
 
+  // Set process group (new/proxy/direct/block) via backend command
+  const handleSetProcessGroup = async (procName: string, groupAction: string, proxyId?: string) => {
+    try {
+      const primaryProxy = proxies.find((p) => p.is_primary) || proxies[0];
+      const effectiveProxyId = proxyId || (groupAction === "proxy" ? primaryProxy?.id : undefined);
+      
+      await invoke("set_process_group", {
+        processName: procName,
+        groupAction,
+        proxyId: effectiveProxyId || null,
+      });
+      
+      // Refresh known processes and rules
+      const kp: KnownProcess[] = await invoke("get_known_processes");
+      setKnownProcesses(kp);
+      const data: SavedData = await invoke("get_saved_data");
+      setRules(data.rules);
+      
+      const labels: Record<string, string> = {
+        proxy: "Проксировать",
+        direct: "Напрямую",
+        block: "Заблокировать",
+        new: "Новые",
+      };
+      showNotification(`${procName} → ${labels[groupAction] || groupAction}`, "success");
+    } catch (err) {
+      showNotification(`Ошибка: ${err}`, "error");
+    }
+  };
+
+  // Clear all application logs
+  const handleClearLogs = async () => {
+    try {
+      await invoke("clear_app_logs");
+      setAppLogs([]);
+      showNotification("Лог очищен", "success");
+    } catch (err) {
+      showNotification(`Ошибка очистки лога: ${err}`, "error");
+    }
+  };
+
   const formatBytes = (bytes: number) => {
     if (bytes <= 0 || isNaN(bytes)) return "0.00 КБ";
     const k = 1024;
@@ -865,7 +975,12 @@ function App() {
   const sortedProcesses = useMemo(() => {
     const rawNames = Object.keys(groupedConnections);
     return [...rawNames]
-      .filter((procName) => procName.toLowerCase().includes(procSearchQuery.toLowerCase()))
+      .filter((procName) => {
+        const lower = procName.toLowerCase();
+        // Hide own process from dashboard
+        if (lower.includes("appproxybridge") || lower.includes("proxier")) return false;
+        return lower.includes(procSearchQuery.toLowerCase());
+      })
       .filter((procName) => {
         const connsList = groupedConnections[procName] || [];
         
@@ -1014,6 +1129,23 @@ function App() {
             color="violet"
             className="interactive-element"
             style={{ borderRadius: "8px" }}
+          />
+          <NavLink
+            label="Лог"
+            leftSection={<IconTerminal2 size={18} />}
+            active={activeTab === "logs"}
+            onClick={() => setActiveTab("logs")}
+            variant="filled"
+            color="violet"
+            className="interactive-element"
+            style={{ borderRadius: "8px" }}
+            rightSection={
+              appLogs.length > 0 ? (
+                <Badge size="xs" color="red" variant="filled" circle>
+                  {appLogs.length > 99 ? "99+" : appLogs.length}
+                </Badge>
+              ) : null
+            }
           />
 
           <Divider my="sm" label="СТАТИСТИКА СЕАНСА" labelPosition="center" styles={{ label: { fontSize: "10px", fontWeight: 700, letterSpacing: "1px", color: "rgba(255,255,255,0.4)" } }} />
@@ -1228,126 +1360,194 @@ function App() {
                   <Text color="dimmed" style={{ textAlign: "center" }} py="xl">
                     Процессов с заданными фильтрами не найдено. Начните сетевую активность.
                   </Text>
-                ) : (
-                  <Stack gap="xs">
-                    {sortedProcesses.map((procName) => {
-                      const connsList = groupedConnections[procName];
-                      const isProxiedProcess = connsList.some((c) => c.action === "Proxy" || c.status === "Proxied");
-                      const isBlockedProcess = connsList.some((c) => c.action === "Block" || c.status === "Blocked");
-                      const activeRule = rules.find((r) => r.process_name.toLowerCase() === procName.toLowerCase());
-                      const lastActivity = processTraffic[procName]?.last_activity || 0;
-                      const isInactive = (Date.now() - lastActivity) > 5000;
+                ) : (() => {
+                  // Build a lookup map for known processes
+                  const knownMap: Record<string, KnownProcess> = {};
+                  knownProcesses.forEach((kp) => {
+                    knownMap[kp.process_name.toLowerCase()] = kp;
+                  });
+                  
+                  // Categorize processes into 4 groups
+                  const groups: Record<string, string[]> = {
+                    new: [],
+                    proxy: [],
+                    direct: [],
+                    block: [],
+                  };
+                  
+                  sortedProcesses.forEach((procName) => {
+                    const known = knownMap[procName.toLowerCase()];
+                    const group = known?.group_action || "new";
+                    if (groups[group]) {
+                      groups[group].push(procName);
+                    } else {
+                      groups.new.push(procName);
+                    }
+                  });
 
-                      const isProxied = (activeRule?.action === "Proxy") || isProxiedProcess;
-                      const isBlocked = (activeRule?.action === "Block") || isBlockedProcess;
+                  const groupConfig = [
+                    { key: "new", label: "НОВЫЕ", icon: <IconSparkles size={16} />, color: "violet", gradient: { from: "violet", to: "pink" } },
+                    { key: "proxy", label: "ПРОКСИРУЮТСЯ", icon: <IconRoute size={16} />, color: "teal", gradient: { from: "teal", to: "cyan" } },
+                    { key: "direct", label: "НАПРЯМУЮ", icon: <IconArrowUpRight size={16} />, color: "gray", gradient: { from: "gray", to: "dark" } },
+                    { key: "block", label: "ЗАБЛОКИРОВАНЫ", icon: <IconLock size={16} />, color: "red", gradient: { from: "red", to: "orange" } },
+                  ];
 
-                      let bg = "rgba(255, 255, 255, 0.01)";
-                      let border = "1px solid var(--glass-border)";
-                      let hoverBg = "rgba(255, 255, 255, 0.03)";
-                      let boxShadow = "none";
+                  const toggleGroup = (key: string) => {
+                    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+                  };
 
-                      if (isProxied) {
-                        bg = "rgba(12, 196, 178, 0.04)";
-                        border = "1px solid rgba(12, 196, 178, 0.2)";
-                        hoverBg = "rgba(12, 196, 178, 0.08)";
-                      } else if (isBlocked) {
-                        bg = "rgba(239, 68, 68, 0.04)";
-                        border = "1px solid rgba(239, 68, 68, 0.2)";
-                        hoverBg = "rgba(239, 68, 68, 0.08)";
-                      }
+                  // Render a single process row
+                  const renderProcessRow = (procName: string, group: string) => {
+                    const connsList = groupedConnections[procName] || [];
+                    const lastActivity = processTraffic[procName]?.last_activity || 0;
+                    const isInactive = (Date.now() - lastActivity) > 5000;
 
-                      // Highlight overrides
-                      if (highlightedProcesses[procName]) {
-                        bg = "rgba(124, 58, 237, 0.2)";
-                        border = "1px solid rgba(124, 58, 237, 0.5)";
-                        hoverBg = "rgba(124, 58, 237, 0.25)";
-                        boxShadow = "0 0 10px rgba(124, 58, 237, 0.25)";
-                      }
+                    let bg = "rgba(255, 255, 255, 0.01)";
+                    let border = "1px solid var(--glass-border)";
+                    let hoverBg = "rgba(255, 255, 255, 0.03)";
+                    let boxShadow = "none";
 
-                      return (
-                        <Paper
-                          key={procName}
-                          onClick={() => setSelectedProcessName(procName)}
-                          p="sm"
-                          radius="md"
-                          style={{
-                            cursor: "pointer",
-                            transition: "all 0.15s ease",
-                            background: bg,
-                            border: border,
-                            opacity: isInactive ? 0.6 : 1,
-                            filter: isInactive ? "grayscale(100%)" : "none",
-                            boxShadow: boxShadow,
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = hoverBg;
-                            e.currentTarget.style.border = border;
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = bg;
-                            e.currentTarget.style.border = border;
-                          }}
-                        >
-                          <Group justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
-                            <Group gap="xs" wrap="nowrap">
-                              <ThemeIcon size="sm" variant="gradient" gradient={{ from: "violet", to: "cyan" }} radius="sm">
-                                <IconActivity size={14} />
-                              </ThemeIcon>
-                              <Text fw={600} size="sm" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                {procName} <span style={{ fontWeight: 400, opacity: 0.6, fontSize: "11px" }}>(PID: {connsList[0]?.pid || "N/A"})</span>
-                              </Text>
-                            </Group>
-                            <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-                              {activeRule ? (
-                                <Badge
-                                  size="xs"
-                                  variant="light"
-                                  color={
-                                    activeRule.action === "Proxy"
-                                      ? "teal"
-                                      : activeRule.action === "Block"
-                                      ? "red"
-                                      : "gray"
-                                  }
-                                >
-                                  {activeRule.action === "Proxy"
-                                    ? "ЧЕРЕЗ ПРОКСИ"
-                                    : activeRule.action === "Block"
-                                    ? "БЛОК"
-                                    : "НАПРЯМУЮ"}
-                                </Badge>
-                              ) : (
-                                <>
-                                  {isBlockedProcess && (
-                                    <Badge size="xs" variant="light" color="red">
-                                      БЛОК
-                                    </Badge>
-                                  )}
-                                  <Badge size="xs" variant="light" color={isProxiedProcess ? "teal" : "gray"}>
-                                    {isProxiedProcess ? "ЧЕРЕЗ ПРОКСИ" : "НАПРЯМУЮ"}
-                                  </Badge>
-                                </>
-                              )}
-                              <Badge variant="filled" color="dark" size="xs" style={{ minWidth: "65px", textAlign: "center" }}>
-                                {connsList.length} соед.
-                              </Badge>
-                              {processTraffic[procName] && (processTraffic[procName].sent > 0 || processTraffic[procName].recv > 0) && (
-                                <>
-                                  <Badge size="xs" variant="light" color="cyan" leftSection="↑" style={{ minWidth: "85px" }}>
-                                    {formatBytes(processTraffic[procName].sent)}
-                                  </Badge>
-                                  <Badge size="xs" variant="light" color="green" leftSection="↓" style={{ minWidth: "85px" }}>
-                                    {formatBytes(processTraffic[procName].recv)}
-                                  </Badge>
-                                </>
-                              )}
-                            </Group>
+                    if (group === "proxy") {
+                      bg = "rgba(12, 196, 178, 0.04)";
+                      border = "1px solid rgba(12, 196, 178, 0.15)";
+                      hoverBg = "rgba(12, 196, 178, 0.08)";
+                    } else if (group === "block") {
+                      bg = "rgba(239, 68, 68, 0.04)";
+                      border = "1px solid rgba(239, 68, 68, 0.15)";
+                      hoverBg = "rgba(239, 68, 68, 0.08)";
+                    }
+
+                    if (highlightedProcesses[procName]) {
+                      bg = "rgba(124, 58, 237, 0.2)";
+                      border = "1px solid rgba(124, 58, 237, 0.5)";
+                      hoverBg = "rgba(124, 58, 237, 0.25)";
+                      boxShadow = "0 0 10px rgba(124, 58, 237, 0.25)";
+                    }
+
+                    // Action buttons: show all actions EXCEPT the current group
+                    const actions = [
+                      { key: "proxy", tooltip: "Проксировать", icon: <IconRoute size={14} />, color: "teal" },
+                      { key: "direct", tooltip: "Напрямую", icon: <IconArrowUpRight size={14} />, color: "gray" },
+                      { key: "block", tooltip: "Заблокировать", icon: <IconLock size={14} />, color: "red" },
+                    ].filter((a) => a.key !== group);
+
+                    return (
+                      <Paper
+                        key={procName}
+                        p="xs"
+                        radius="md"
+                        style={{
+                          cursor: "pointer",
+                          transition: "all 0.15s ease",
+                          background: bg,
+                          border,
+                          opacity: isInactive ? 0.6 : 1,
+                          filter: isInactive ? "grayscale(100%)" : "none",
+                          boxShadow,
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = hoverBg;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = bg;
+                        }}
+                      >
+                        <Group justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
+                          <Group gap="xs" wrap="nowrap" onClick={() => setSelectedProcessName(procName)} style={{ cursor: "pointer", flex: 1, minWidth: 0 }}>
+                            <ThemeIcon size="sm" variant="gradient" gradient={{ from: "violet", to: "cyan" }} radius="sm">
+                              <IconActivity size={14} />
+                            </ThemeIcon>
+                            <Text fw={600} size="sm" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {procName} <span style={{ fontWeight: 400, opacity: 0.6, fontSize: "11px" }}>(PID: {connsList[0]?.pid || "N/A"})</span>
+                            </Text>
                           </Group>
-                        </Paper>
-                      );
-                    })}
-                  </Stack>
-                )}
+                          <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+                            {connsList.length > 0 && (
+                              <Badge variant="filled" color="dark" size="xs" style={{ minWidth: "50px", textAlign: "center" }}>
+                                {connsList.length}
+                              </Badge>
+                            )}
+                            {processTraffic[procName] && (processTraffic[procName].sent > 0 || processTraffic[procName].recv > 0) && (
+                              <>
+                                <Badge size="xs" variant="light" color="cyan" leftSection="↑" style={{ minWidth: "75px" }}>
+                                  {formatBytes(processTraffic[procName].sent)}
+                                </Badge>
+                                <Badge size="xs" variant="light" color="green" leftSection="↓" style={{ minWidth: "75px" }}>
+                                  {formatBytes(processTraffic[procName].recv)}
+                                </Badge>
+                              </>
+                            )}
+                            <Divider orientation="vertical" color="var(--glass-border)" style={{ height: "20px", margin: "0 4px" }} />
+                            {actions.map((action) => (
+                              <Tooltip key={action.key} label={action.tooltip} position="top" withArrow>
+                                <ActionIcon
+                                  variant="subtle"
+                                  color={action.color}
+                                  size="sm"
+                                  radius="md"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSetProcessGroup(procName, action.key);
+                                  }}
+                                  style={{ transition: "all 0.15s ease" }}
+                                >
+                                  {action.icon}
+                                </ActionIcon>
+                              </Tooltip>
+                            ))}
+                          </Group>
+                        </Group>
+                      </Paper>
+                    );
+                  };
+
+                  return (
+                    <Stack gap="md">
+                      {groupConfig.map((gc) => {
+                        const items = groups[gc.key] || [];
+                        if (items.length === 0) return null;
+                        const isCollapsed = collapsedGroups[gc.key] || false;
+
+                        return (
+                          <div key={gc.key}>
+                            <Paper
+                              p="xs"
+                              radius="md"
+                              onClick={() => toggleGroup(gc.key)}
+                              style={{
+                                cursor: "pointer",
+                                background: `rgba(${gc.color === "teal" ? "12, 196, 178" : gc.color === "red" ? "239, 68, 68" : gc.color === "violet" ? "124, 58, 237" : "120, 120, 130"}, 0.08)`,
+                                border: `1px solid rgba(${gc.color === "teal" ? "12, 196, 178" : gc.color === "red" ? "239, 68, 68" : gc.color === "violet" ? "124, 58, 237" : "120, 120, 130"}, 0.25)`,
+                                transition: "all 0.15s ease",
+                                marginBottom: isCollapsed ? 0 : "4px",
+                              }}
+                            >
+                              <Group justify="space-between" wrap="nowrap">
+                                <Group gap="xs" wrap="nowrap">
+                                  <ThemeIcon size="sm" variant="gradient" gradient={gc.gradient} radius="sm">
+                                    {gc.icon}
+                                  </ThemeIcon>
+                                  <Text fw={700} size="xs" style={{ letterSpacing: "1px", textTransform: "uppercase" }}>
+                                    {gc.label}
+                                  </Text>
+                                  <Badge size="xs" variant="filled" color={gc.color}>
+                                    {items.length}
+                                  </Badge>
+                                </Group>
+                                {isCollapsed ? <IconChevronRight size={16} /> : <IconChevronDown size={16} />}
+                              </Group>
+                            </Paper>
+                            {!isCollapsed && (
+                              <Stack gap={3} mt={4}>
+                                {items.map((procName) => renderProcessRow(procName, gc.key))}
+                              </Stack>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </Stack>
+                  );
+                })()}
               </ScrollArea>
             </Card>
           </Stack>
@@ -1705,6 +1905,130 @@ function App() {
             );
           })()}
         </Modal>
+
+        {/* TAB: Logs */}
+        {activeTab === "logs" && (
+          <Stack gap="md" style={{ height: "calc(100vh - 92px)", display: "flex", flexDirection: "column" }}>
+            <Card radius="md" p="md" className="glass-panel" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <Group justify="space-between" mb="md" align="center">
+                <Group gap="xs">
+                  <ThemeIcon size="md" variant="gradient" gradient={{ from: "red", to: "orange" }} radius="md">
+                    <IconTerminal2 size={18} />
+                  </ThemeIcon>
+                  <Title order={4} style={{ fontFamily: "Outfit, sans-serif" }}>
+                    СИСТЕМНЫЙ ЛОГ
+                  </Title>
+                  <Badge size="sm" variant="light" color="gray">
+                    {appLogs.length} / 300
+                  </Badge>
+                </Group>
+                <Tooltip label="Очистить все записи">
+                  <ActionIcon
+                    variant="light"
+                    color="red"
+                    size="lg"
+                    radius="md"
+                    onClick={handleClearLogs}
+                    disabled={appLogs.length === 0}
+                  >
+                    <IconClearAll size={18} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+
+              <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+                <div style={{
+                  background: "#0a0a0f",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255, 255, 255, 0.06)",
+                  padding: "12px",
+                  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+                  fontSize: "12px",
+                  lineHeight: "1.8",
+                  minHeight: "300px",
+                }}>
+                  {appLogs.length === 0 ? (
+                    <Text color="dimmed" size="sm" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", padding: "40px 0" }}>
+                      Лог пуст. Ошибки приложения будут отображаться здесь в реальном времени.
+                    </Text>
+                  ) : (
+                    appLogs.map((log, idx) => {
+                      const date = new Date(log.timestamp);
+                      const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+                      const dateStr = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}`;
+                      
+                      const levelColors: Record<string, string> = {
+                        error: "#ff4757",
+                        warn: "#ffa502",
+                        info: "#70a1ff",
+                      };
+                      const levelLabels: Record<string, string> = {
+                        error: "ERROR",
+                        warn: " WARN",
+                        info: " INFO",
+                      };
+                      const sourceColors: Record<string, string> = {
+                        relay: "#00d2d3",
+                        windivert: "#a78bfa",
+                        engine: "#60a5fa",
+                        system: "#78909c",
+                      };
+
+                      const levelColor = levelColors[log.level] || "#aaa";
+                      const srcColor = sourceColors[log.source] || "#aaa";
+
+                      return (
+                        <div
+                          key={log.id || idx}
+                          style={{
+                            borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
+                            padding: "4px 0",
+                            display: "flex",
+                            gap: "8px",
+                            alignItems: "flex-start",
+                            transition: "background 0.15s ease",
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = "transparent";
+                          }}
+                        >
+                          <span style={{ color: "rgba(255, 255, 255, 0.3)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                            {dateStr} {timeStr}
+                          </span>
+                          <span style={{
+                            color: levelColor,
+                            fontWeight: 700,
+                            flexShrink: 0,
+                            textShadow: `0 0 8px ${levelColor}33`,
+                          }}>
+                            {levelLabels[log.level] || log.level.toUpperCase().padStart(5)}
+                          </span>
+                          <span style={{
+                            color: srcColor,
+                            fontWeight: 600,
+                            flexShrink: 0,
+                            minWidth: "70px",
+                          }}>
+                            {log.source}
+                          </span>
+                          <span style={{
+                            color: "rgba(255, 255, 255, 0.85)",
+                            wordBreak: "break-all",
+                          }}>
+                            {log.message}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </ScrollArea>
+            </Card>
+          </Stack>
+        )}
 
         {/* TAB: Rules */}
         {activeTab === "rules" && (

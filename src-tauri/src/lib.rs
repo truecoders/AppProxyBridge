@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use tauri::{State, AppHandle, Manager};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
 use tauri::menu::{Menu, MenuItem};
-use proxy_core::{EngineState, ProxyConfig, Rule};
+use proxy_core::{EngineState, ProxyConfig, Rule, KnownProcess, LogEntry};
 
 // Thread-safe wrapper for the SQLite database path
 struct DbPath(PathBuf);
@@ -33,8 +33,30 @@ async fn is_engine_running(state: State<'_, Arc<EngineState>>) -> Result<bool, S
 }
 
 #[tauri::command]
-async fn get_active_connections(state: State<'_, Arc<EngineState>>) -> Result<Vec<proxy_core::ConnectionInfo>, String> {
-    Ok(proxy_core::get_active_system_connections(&state))
+async fn get_active_connections(
+    state: State<'_, Arc<EngineState>>,
+    db_path: State<'_, DbPath>,
+) -> Result<Vec<proxy_core::ConnectionInfo>, String> {
+    let connections = proxy_core::get_active_system_connections(&state);
+    
+    // Auto-discover new processes and add them to known_processes
+    let process_names: Vec<String> = connections.iter()
+        .map(|c| c.process_name.clone())
+        .filter(|n| {
+            let lower = n.to_lowercase();
+            !lower.contains("appproxybridge") && !lower.contains("proxier") && n != "Unknown"
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    
+    if !process_names.is_empty() {
+        if let Ok(conn) = database::init_db(db_path.0.clone()) {
+            let _ = database::upsert_new_processes(&conn, &process_names);
+        }
+    }
+    
+    Ok(connections)
 }
 
 #[derive(serde::Serialize)]
@@ -157,8 +179,11 @@ async fn start_engine(
     // Set running to true
     state.running.store(true, Ordering::Relaxed);
     
+    // Resolve DB path for logging in relay/windivert threads
+    let db_path_val = app_handle.state::<DbPath>().0.clone();
+    
     // Start WinDivert packet capture loop (synchronous handle initialization)
-    if let Err(e) = proxy_core::start_windivert_loop(state.inner().clone(), app_handle.clone()) {
+    if let Err(e) = proxy_core::start_windivert_loop(state.inner().clone(), app_handle.clone(), db_path_val.clone()) {
         state.running.store(false, Ordering::Relaxed);
         return Err(e);
     }
@@ -166,14 +191,16 @@ async fn start_engine(
     // Start TCP/UDP Relay servers
     let state_tcp = state.inner().clone();
     let app_tcp = app_handle.clone();
+    let db_tcp = db_path_val.clone();
     tokio::spawn(async move {
-        relay::start_tcp_relay(state_tcp, app_tcp).await;
+        relay::start_tcp_relay(state_tcp, app_tcp, db_tcp).await;
     });
 
     let state_udp = state.inner().clone();
     let app_udp = app_handle.clone();
+    let db_udp = db_path_val.clone();
     tokio::spawn(async move {
-        relay::start_udp_relay(state_udp, app_udp).await;
+        relay::start_udp_relay(state_udp, app_udp, db_udp).await;
     });
     
     Ok("Engine started successfully".to_string())
@@ -243,6 +270,118 @@ async fn save_routing_settings(
     state.minimize_to_tray.store(minimize_to_tray, Ordering::Relaxed);
     
     Ok("Routing settings saved".to_string())
+}
+
+// ==================== Known Processes Commands ====================
+
+#[tauri::command]
+async fn get_known_processes(db_path: State<'_, DbPath>) -> Result<Vec<KnownProcess>, String> {
+    let conn = database::init_db(db_path.0.clone())
+        .map_err(|e| format!("DB Error: {:?}", e))?;
+    database::load_known_processes(&conn)
+        .map_err(|e| format!("DB Load Known Processes Error: {:?}", e))
+}
+
+#[tauri::command]
+async fn set_process_group(
+    process_name: String,
+    group_action: String,
+    proxy_id: Option<String>,
+    db_path: State<'_, DbPath>,
+    state: State<'_, Arc<EngineState>>,
+) -> Result<String, String> {
+    let conn = database::init_db(db_path.0.clone())
+        .map_err(|e| format!("DB Error: {:?}", e))?;
+    
+    // Load existing process to preserve created_at
+    let existing = database::load_known_processes(&conn)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|p| p.process_name.to_lowercase() == process_name.to_lowercase());
+    
+    let created_at = existing.map(|e| e.created_at).unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    });
+    
+    // Save to known_processes table
+    let proc = KnownProcess {
+        process_name: process_name.clone(),
+        group_action: group_action.clone(),
+        proxy_id: proxy_id.clone(),
+        created_at,
+    };
+    database::save_known_process(&conn, &proc)
+        .map_err(|e| format!("DB Save Known Process Error: {:?}", e))?;
+    
+    // Synchronize with rules table and in-memory engine rules
+    let mut current_rules = database::load_rules(&conn).unwrap_or_default();
+    
+    // Remove existing rule for this process
+    current_rules.retain(|r| r.process_name.to_lowercase() != process_name.to_lowercase());
+    
+    // Create new rule based on group_action
+    match group_action.as_str() {
+        "proxy" => {
+            current_rules.push(Rule {
+                id: format!("auto-{}", process_name.to_lowercase().replace('.', "-")),
+                process_name: process_name.clone(),
+                action: proxy_core::RuleAction::Proxy,
+                proxy_id: proxy_id,
+            });
+        }
+        "block" => {
+            current_rules.push(Rule {
+                id: format!("auto-{}", process_name.to_lowercase().replace('.', "-")),
+                process_name: process_name.clone(),
+                action: proxy_core::RuleAction::Block,
+                proxy_id: None,
+            });
+        }
+        "direct" => {
+            // Direct = rule with Direct action (explicitly marked, not just absence of rule)
+            current_rules.push(Rule {
+                id: format!("auto-{}", process_name.to_lowercase().replace('.', "-")),
+                process_name: process_name.clone(),
+                action: proxy_core::RuleAction::Direct,
+                proxy_id: None,
+            });
+        }
+        _ => {
+            // "new" — no rule needed, remove any existing
+        }
+    }
+    
+    // Save rules to DB
+    database::save_rules(&conn, &current_rules)
+        .map_err(|e| format!("DB Save Rules Error: {:?}", e))?;
+    
+    // Update in-memory engine rules
+    let mut rls = state.rules.lock().await;
+    *rls = current_rules;
+    
+    Ok(format!("Process {} set to group {}", process_name, group_action))
+}
+
+// ==================== Application Logs Commands ====================
+
+#[tauri::command]
+async fn get_app_logs(db_path: State<'_, DbPath>) -> Result<Vec<LogEntry>, String> {
+    let conn = database::init_db(db_path.0.clone())
+        .map_err(|e| format!("DB Error: {:?}", e))?;
+    database::load_logs(&conn)
+        .map_err(|e| format!("DB Load Logs Error: {:?}", e))
+}
+
+#[tauri::command]
+async fn clear_app_logs(db_path: State<'_, DbPath>) -> Result<String, String> {
+    let conn = database::init_db(db_path.0.clone())
+        .map_err(|e| format!("DB Error: {:?}", e))?;
+    database::clear_logs(&conn)
+        .map_err(|e| format!("DB Clear Logs Error: {:?}", e))?;
+    Ok("Logs cleared".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -357,7 +496,11 @@ pub fn run() {
             start_engine,
             stop_engine,
             update_engine_rules,
-            save_routing_settings
+            save_routing_settings,
+            get_known_processes,
+            set_process_group,
+            get_app_logs,
+            clear_app_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

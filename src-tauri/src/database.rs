@@ -2,7 +2,7 @@ use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use rusqlite::{Connection, Result};
-use crate::proxy_core::{ProxyConfig, Rule};
+use crate::proxy_core::{ProxyConfig, Rule, KnownProcess, LogEntry};
 
 // Initialize the database at the user app data directory
 pub fn init_db(db_path: PathBuf) -> Result<Connection> {
@@ -39,6 +39,29 @@ pub fn init_db(db_path: PathBuf) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    // Create Known Processes table (process grouping persistence)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS known_processes (
+            process_name TEXT PRIMARY KEY,
+            group_action TEXT NOT NULL DEFAULT 'new',
+            proxy_id TEXT,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
+    // Create Application Logs table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp INTEGER NOT NULL,
+            level TEXT NOT NULL,
+            source TEXT NOT NULL,
+            message TEXT NOT NULL
         )",
         [],
     )?;
@@ -300,3 +323,104 @@ pub fn save_settings(
 
     Ok(())
 }
+
+// ==================== Known Processes ====================
+
+/// Load all known processes from DB
+pub fn load_known_processes(conn: &Connection) -> Result<Vec<KnownProcess>> {
+    let mut stmt = conn.prepare(
+        "SELECT process_name, group_action, proxy_id, created_at FROM known_processes ORDER BY created_at DESC"
+    )?;
+    let iter = stmt.query_map([], |row| {
+        Ok(KnownProcess {
+            process_name: row.get(0)?,
+            group_action: row.get(1)?,
+            proxy_id: row.get(2)?,
+            created_at: row.get::<_, i64>(3)? as u64,
+        })
+    })?;
+    let mut list = Vec::new();
+    for p in iter {
+        list.push(p?);
+    }
+    Ok(list)
+}
+
+/// Upsert a single known process
+pub fn save_known_process(conn: &Connection, proc: &KnownProcess) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO known_processes (process_name, group_action, proxy_id, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        (
+            &proc.process_name,
+            &proc.group_action,
+            &proc.proxy_id,
+            proc.created_at as i64,
+        ),
+    )?;
+    Ok(())
+}
+
+/// Batch upsert new processes (only insert if not exists, preserving existing group_action)
+pub fn upsert_new_processes(conn: &Connection, process_names: &[String]) -> Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    for name in process_names {
+        conn.execute(
+            "INSERT OR IGNORE INTO known_processes (process_name, group_action, proxy_id, created_at)
+             VALUES (?1, 'new', NULL, ?2)",
+            (&name, now),
+        )?;
+    }
+    Ok(())
+}
+
+// ==================== Application Logs ====================
+
+/// Insert a log entry and trim to last 300 entries
+pub fn insert_log(conn: &Connection, level: &str, source: &str, message: &str) -> Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    conn.execute(
+        "INSERT INTO app_logs (timestamp, level, source, message) VALUES (?1, ?2, ?3, ?4)",
+        (now, level, source, message),
+    )?;
+    // Trim: keep only the last 300 entries
+    conn.execute(
+        "DELETE FROM app_logs WHERE id NOT IN (SELECT id FROM app_logs ORDER BY id DESC LIMIT 300)",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Load last 300 log entries (newest first)
+pub fn load_logs(conn: &Connection) -> Result<Vec<LogEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, timestamp, level, source, message FROM app_logs ORDER BY id DESC LIMIT 300"
+    )?;
+    let iter = stmt.query_map([], |row| {
+        Ok(LogEntry {
+            id: row.get(0)?,
+            timestamp: row.get::<_, i64>(1)? as u64,
+            level: row.get(2)?,
+            source: row.get(3)?,
+            message: row.get(4)?,
+        })
+    })?;
+    let mut list = Vec::new();
+    for l in iter {
+        list.push(l?);
+    }
+    Ok(list)
+}
+
+/// Clear all log entries
+pub fn clear_logs(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM app_logs", [])?;
+    Ok(())
+}
+

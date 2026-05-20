@@ -1,17 +1,33 @@
 use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
-use crate::proxy_core::EngineState;
+use crate::proxy_core::{EngineState, LogEntry};
 use tauri::{AppHandle, Emitter};
 
-pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
+/// Helper: log to DB and emit event to frontend
+fn emit_log(db_path: &PathBuf, app: &AppHandle, level: &str, source: &str, message: &str) {
+    if let Ok(conn) = crate::database::init_db(db_path.clone()) {
+        let _ = crate::database::insert_log(&conn, level, source, message);
+    }
+    let log_entry = LogEntry {
+        id: 0,
+        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+        level: level.to_string(),
+        source: source.to_string(),
+        message: message.to_string(),
+    };
+    let _ = app.emit("log-event", log_entry);
+}
+
+pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle, db_path: PathBuf) {
     let running = state.running.clone();
     let addr = "0.0.0.0:34020";
     
     let listener = match TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("CRITICAL: Failed to bind TCP relay listener to {}: {:?}", addr, e);
+            emit_log(&db_path, &app, "error", "relay", &format!("Failed to bind TCP relay listener to {}: {:?}", addr, e));
             return;
         }
     };
@@ -24,6 +40,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
         
         let state_clone = state.clone();
         let app_clone = app.clone();
+        let db_clone = db_path.clone();
         
         tokio::spawn(async move {
             // Find original destination and proxy ID for this port
@@ -95,7 +112,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
                                     }
                                 }
                                 Err(handshake_err) => {
-                                    eprintln!("CRITICAL: Proxy handshake failed for upstream {}: {:?}", proxy_addr, handshake_err);
+                                    emit_log(&db_clone, &app_clone, "error", "relay", &format!("Proxy handshake failed for upstream {}: {:?}", proxy_addr, handshake_err));
                                     // Emit closed event on handshake failure
                                     let conn_event = crate::proxy_core::ConnectionInfo {
                                         id: connection_id.clone(),
@@ -115,7 +132,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
                             }
                         }
                         Err(e) => {
-                            eprintln!("CRITICAL: Failed to connect to upstream proxy at {}: {:?}", proxy_addr, e);
+                            emit_log(&db_clone, &app_clone, "error", "relay", &format!("Failed to connect to upstream proxy at {}: {:?}", proxy_addr, e));
                             // Emit closed event
                             let conn_event = crate::proxy_core::ConnectionInfo {
                                 id: connection_id.clone(),
@@ -166,7 +183,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
                             }
                         }
                         Err(e) => {
-                            eprintln!("Direct fallback connection failed: {:?}", e);
+                            emit_log(&db_clone, &app_clone, "warn", "relay", &format!("Direct fallback connection failed to {}: {:?}", dest_addr, e));
                         }
                     }
                 }
@@ -175,7 +192,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle) {
     }
 }
 
-pub async fn start_udp_relay(state: Arc<EngineState>, _app: AppHandle) {
+pub async fn start_udp_relay(state: Arc<EngineState>, _app: AppHandle, _db_path: PathBuf) {
     // SOCKS5 UDP Associate relay implementation structure
     let running = state.running.clone();
     let _addr = "0.0.0.0:34021";
