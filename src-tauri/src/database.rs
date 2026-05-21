@@ -104,9 +104,20 @@ pub fn init_db(db_path: PathBuf) -> Result<Connection> {
 pub fn set_autostart(enabled: bool) -> Result<(), rusqlite::Error> {
     let current_exe = match std::env::current_exe() {
         Ok(path) => path,
-        Err(_) => return Ok(()),
+        Err(e) => {
+            eprintln!("[autostart] Failed to get current exe path: {}", e);
+            return Ok(());
+        }
     };
-    let exe_path = current_exe.to_string_lossy().to_string();
+    // Normalize path: strip \\?\ prefix that Windows can add — schtasks doesn't handle it
+    let exe_path_raw = current_exe.to_string_lossy().to_string();
+    let exe_path = if exe_path_raw.starts_with("\\\\?\\") {
+        exe_path_raw[4..].to_string()
+    } else {
+        exe_path_raw
+    };
+
+    eprintln!("[autostart] exe_path={}, enabled={}", exe_path, enabled);
 
     #[cfg(target_os = "windows")]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -138,38 +149,124 @@ pub fn set_autostart(enabled: bool) -> Result<(), rusqlite::Error> {
         ])
         .status();
 
-    // 2. Manage Task Scheduler task
+    // 2. Always delete old task first (clean slate)
+    {
+        let mut del_cmd = std::process::Command::new("schtasks");
+        #[cfg(target_os = "windows")]
+        del_cmd.creation_flags(CREATE_NO_WINDOW);
+        let _ = del_cmd
+            .args(&["/delete", "/tn", "AppProxyBridge", "/f"])
+            .output(); // use output() to suppress stderr
+    }
+
+    // 3. Create Task Scheduler task via XML for reliability
     if enabled {
+        // Get current username for the task principal
+        let username = std::env::var("USERNAME").unwrap_or_else(|_| "SYSTEM".to_string());
+        let userdomain = std::env::var("USERDOMAIN").unwrap_or_else(|_| ".".to_string());
+        let full_user = format!("{}\\{}", userdomain, username);
+
+        // XML task definition — runs at logon with highest privileges
+        let task_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>AppProxyBridge autostart</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{user}</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{user}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{exe}</Command>
+    </Exec>
+  </Actions>
+</Task>"#,
+            user = full_user,
+            exe = exe_path
+        );
+
+        // Write XML to temp file
+        let temp_dir = std::env::temp_dir();
+        let xml_path = temp_dir.join("appproxybridge_task.xml");
+        
+        // Write as UTF-16 LE with BOM (required by schtasks /xml)
+        let utf16_bytes: Vec<u8> = {
+            let bom: [u8; 2] = [0xFF, 0xFE]; // UTF-16 LE BOM
+            let utf16: Vec<u16> = task_xml.encode_utf16().collect();
+            let mut bytes = Vec::with_capacity(2 + utf16.len() * 2);
+            bytes.extend_from_slice(&bom);
+            for code_unit in &utf16 {
+                bytes.extend_from_slice(&code_unit.to_le_bytes());
+            }
+            bytes
+        };
+
+        if let Err(e) = std::fs::write(&xml_path, &utf16_bytes) {
+            eprintln!("[autostart] Failed to write task XML: {}", e);
+            return Ok(());
+        }
+
+        let xml_path_str = xml_path.to_string_lossy().to_string();
         let mut sch_cmd = std::process::Command::new("schtasks");
         #[cfg(target_os = "windows")]
         sch_cmd.creation_flags(CREATE_NO_WINDOW);
-        let _ = sch_cmd
+        
+        match sch_cmd
             .args(&[
                 "/create",
                 "/tn",
                 "AppProxyBridge",
-                "/tr",
-                &format!("\"{}\"", exe_path),
-                "/sc",
-                "onlogon",
-                "/rl",
-                "highest",
+                "/xml",
+                &xml_path_str,
                 "/f"
             ])
-            .status();
-    } else {
-        let mut sch_cmd = std::process::Command::new("schtasks");
-        #[cfg(target_os = "windows")]
-        sch_cmd.creation_flags(CREATE_NO_WINDOW);
-        let _ = sch_cmd
-            .args(&[
-                "/delete",
-                "/tn",
-                "AppProxyBridge",
-                "/f"
-            ])
-            .status();
+            .output()
+        {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    eprintln!("[autostart] schtasks /create failed: exit={}, stdout={}, stderr={}", 
+                        output.status, stdout.trim(), stderr.trim());
+                } else {
+                    eprintln!("[autostart] Task created successfully");
+                }
+            }
+            Err(e) => {
+                eprintln!("[autostart] Failed to run schtasks: {}", e);
+            }
+        }
+
+        // Clean up temp XML
+        let _ = std::fs::remove_file(&xml_path);
     }
+
     Ok(())
 }
 
