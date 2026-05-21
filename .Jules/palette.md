@@ -1,0 +1,3 @@
+## 2024-05-21 - Explicit aria-labels needed for icon-only ActionIcons in Mantine
+**Learning:** When using Mantine's `ActionIcon` component with only an SVG/Icon child (like `@tabler/icons-react`), it does not inherently provide an accessible name, even if wrapped in a `Tooltip`. Screen readers need an explicit text alternative to describe the button's action.
+**Action:** Always provide a descriptive `aria-label` property on `ActionIcon` components when they only contain visual icons without inner text, ensuring screen reader users understand the button's purpose (e.g. `aria-label="Удалить прокси"`).
