@@ -61,10 +61,14 @@ pub fn init_db(db_path: PathBuf) -> Result<Connection> {
             timestamp INTEGER NOT NULL,
             level TEXT NOT NULL,
             source TEXT NOT NULL,
-            message TEXT NOT NULL
+            message TEXT NOT NULL,
+            process_name TEXT
         )",
         [],
     )?;
+
+    // Migration: add process_name column to app_logs if it doesn't exist
+    let _ = conn.execute("ALTER TABLE app_logs ADD COLUMN process_name TEXT", []);
 
     // Set default settings if they do not exist
     {
@@ -477,14 +481,14 @@ pub fn upsert_new_processes(conn: &Connection, process_names: &[String]) -> Resu
 // ==================== Application Logs ====================
 
 /// Insert a log entry and trim to last 300 entries
-pub fn insert_log(conn: &Connection, level: &str, source: &str, message: &str) -> Result<()> {
+pub fn insert_log(conn: &Connection, level: &str, source: &str, message: &str, process_name: Option<&str>) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
     conn.execute(
-        "INSERT INTO app_logs (timestamp, level, source, message) VALUES (?1, ?2, ?3, ?4)",
-        (now, level, source, message),
+        "INSERT INTO app_logs (timestamp, level, source, message, process_name) VALUES (?1, ?2, ?3, ?4, ?5)",
+        (now, level, source, message, process_name),
     )?;
     // Trim: keep only the last 300 entries
     conn.execute(
@@ -497,7 +501,7 @@ pub fn insert_log(conn: &Connection, level: &str, source: &str, message: &str) -
 /// Load last 300 log entries (newest first)
 pub fn load_logs(conn: &Connection) -> Result<Vec<LogEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT id, timestamp, level, source, message FROM app_logs ORDER BY id DESC LIMIT 300"
+        "SELECT id, timestamp, level, source, message, process_name FROM app_logs ORDER BY id DESC LIMIT 300"
     )?;
     let iter = stmt.query_map([], |row| {
         Ok(LogEntry {
@@ -506,6 +510,7 @@ pub fn load_logs(conn: &Connection) -> Result<Vec<LogEntry>> {
             level: row.get(2)?,
             source: row.get(3)?,
             message: row.get(4)?,
+            process_name: row.get(5)?,
         })
     })?;
     let mut list = Vec::new();

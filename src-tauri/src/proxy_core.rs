@@ -41,6 +41,7 @@ pub struct LogEntry {
     pub level: String,   // "error", "warn", "info"
     pub source: String,  // "relay", "windivert", "engine", "system"
     pub message: String,
+    pub process_name: Option<String>,
 }
 
 
@@ -362,7 +363,7 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                     if let Err(e) = process_diverted_packet_sync(&mut packet, state_clone.clone(), app_clone.clone()) {
                         let msg = format!("Error processing packet: {:?}", e);
                         if let Ok(conn) = crate::database::init_db(db_path.clone()) {
-                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg);
+                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
                         }
                         let log_entry = LogEntry {
                             id: 0,
@@ -370,6 +371,7 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                             level: "error".to_string(),
                             source: "windivert".to_string(),
                             message: msg,
+                            process_name: None,
                         };
                         let _ = app_clone.emit("log-event", log_entry);
                     }
@@ -378,7 +380,7 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                     if let Err(e) = handle.send(&packet) {
                         let msg = format!("WinDivert send error: {:?}", e);
                         if let Ok(conn) = crate::database::init_db(db_path.clone()) {
-                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg);
+                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
                         }
                         let log_entry = LogEntry {
                             id: 0,
@@ -386,6 +388,7 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                             level: "error".to_string(),
                             source: "windivert".to_string(),
                             message: msg,
+                            process_name: None,
                         };
                         let _ = app_clone.emit("log-event", log_entry);
                     }
@@ -393,7 +396,7 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                 Err(e) => {
                     let msg = format!("WinDivert recv error: {:?}", e);
                     if let Ok(conn) = crate::database::init_db(db_path.clone()) {
-                        let _ = crate::database::insert_log(&conn, "error", "windivert", &msg);
+                        let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
                     }
                     let log_entry = LogEntry {
                         id: 0,
@@ -401,6 +404,7 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                         level: "error".to_string(),
                         source: "windivert".to_string(),
                         message: msg,
+                        process_name: None,
                     };
                     let _ = app_clone.emit("log-event", log_entry);
                     std::thread::sleep(std::time::Duration::from_millis(10));

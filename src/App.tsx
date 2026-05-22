@@ -30,6 +30,10 @@ import {
   Tooltip,
   Modal,
   Progress,
+  Accordion,
+  Tabs,
+  SegmentedControl,
+  Skeleton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -56,6 +60,8 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconClearAll,
+  IconHistory,
+  IconAdjustments,
 } from "@tabler/icons-react";
 
 // Types matching Rust model
@@ -114,6 +120,7 @@ interface LogEntry {
   level: string;
   source: string;
   message: string;
+  process_name?: string;
 }
 
 function formatConnectionTime(timestampMs: number): string {
@@ -160,6 +167,46 @@ function formatConnectionTime(timestampMs: number): string {
 function App() {
   const [opened, { toggle }] = useDisclosure();
   const [activeTab, setActiveTab] = useState("dashboard");
+
+  // Log display settings
+  const [logViewMode, setLogViewMode] = useState<string>("all");
+
+  // GitHub Changelog states
+  interface GitHubRelease {
+    id: number;
+    tag_name: string;
+    name: string;
+    published_at: string;
+    body: string;
+    html_url: string;
+  }
+  const [releases, setReleases] = useState<GitHubRelease[]>([]);
+  const [isLoadingReleases, setIsLoadingReleases] = useState(false);
+  const [releasesError, setReleasesError] = useState<string | null>(null);
+
+  const fetchReleases = async () => {
+    setIsLoadingReleases(true);
+    setReleasesError(null);
+    try {
+      const response = await fetch("https://api.github.com/repos/truecoders/AppProxyBridge/releases");
+      if (!response.ok) {
+        throw new Error(`Ошибка загрузки: ${response.statusText}`);
+      }
+      const data = await response.json();
+      setReleases(data);
+    } catch (err: any) {
+      setReleasesError(err.message || "Не удалось загрузить историю изменений");
+    } finally {
+      setIsLoadingReleases(false);
+    }
+  };
+
+  // Fetch releases when settings tab is opened and releases are not loaded yet
+  useEffect(() => {
+    if (activeTab === "settings" && releases.length === 0) {
+      fetchReleases();
+    }
+  }, [activeTab, releases.length]);
 
   // App Engine states
   const [isRunning, setIsRunning] = useState(false);
@@ -1237,6 +1284,16 @@ function App() {
           <NavLink
             label="Настройки прокси"
             leftSection={<IconSettings size={18} />}
+            active={activeTab === "proxy_settings"}
+            onClick={() => setActiveTab("proxy_settings")}
+            variant="filled"
+            color="violet"
+            className="interactive-element"
+            style={{ borderRadius: "8px" }}
+          />
+          <NavLink
+            label="Настройки приложения"
+            leftSection={<IconAdjustments size={18} />}
             active={activeTab === "settings"}
             onClick={() => setActiveTab("settings")}
             variant="filled"
@@ -2139,109 +2196,311 @@ function App() {
                     {appLogs.length} / 300
                   </Badge>
                 </Group>
-                <Tooltip label="Очистить все записи">
-                  <ActionIcon
-                    variant="light"
-                    color="red"
-                    size="lg"
+
+                <Group gap="md">
+                  <SegmentedControl
+                    value={logViewMode}
+                    onChange={(val) => setLogViewMode(val || "all")}
+                    data={[
+                      { label: "Все логи", value: "all" },
+                      { label: "По процессам", value: "by_process" },
+                    ]}
+                    size="xs"
                     radius="md"
-                    onClick={handleClearLogs}
-                    disabled={appLogs.length === 0}
-                  >
-                    <IconClearAll size={18} />
-                  </ActionIcon>
-                </Tooltip>
+                    color="violet"
+                    styles={{
+                      root: {
+                        background: "rgba(255, 255, 255, 0.02)",
+                        border: "1px solid var(--glass-border)",
+                      }
+                    }}
+                  />
+
+                  <Tooltip label="Очистить все записи">
+                    <ActionIcon
+                      variant="light"
+                      color="red"
+                      size="lg"
+                      radius="md"
+                      onClick={handleClearLogs}
+                      disabled={appLogs.length === 0}
+                    >
+                      <IconClearAll size={18} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
               </Group>
 
               <ScrollArea style={{ flex: 1, minHeight: 0 }}>
-                <div style={{
-                  background: "#0a0a0f",
-                  borderRadius: "8px",
-                  border: "1px solid rgba(255, 255, 255, 0.06)",
-                  padding: "12px",
-                  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                  fontSize: "12px",
-                  lineHeight: "1.8",
-                  minHeight: "300px",
-                }}>
-                  {appLogs.length === 0 ? (
-                    <Text color="dimmed" size="sm" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", padding: "40px 0" }}>
-                      Лог пуст. Ошибки приложения будут отображаться здесь в реальном времени.
-                    </Text>
-                  ) : (
-                    appLogs.map((log, idx) => {
-                      const date = new Date(log.timestamp);
-                      const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
-                      const dateStr = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}`;
-                      
-                      const levelColors: Record<string, string> = {
-                        error: "#ff4757",
-                        warn: "#ffa502",
-                        info: "#70a1ff",
-                      };
-                      const levelLabels: Record<string, string> = {
-                        error: "ERROR",
-                        warn: " WARN",
-                        info: " INFO",
-                      };
-                      const sourceColors: Record<string, string> = {
-                        relay: "#00d2d3",
-                        windivert: "#a78bfa",
-                        engine: "#60a5fa",
-                        system: "#78909c",
-                      };
+                {logViewMode === "by_process" ? (() => {
+                  // Group logs by process
+                  const groups: Record<string, LogEntry[]> = {};
+                  appLogs.forEach((log) => {
+                    const proc = log.process_name || "Система / Глобальные";
+                    if (!groups[proc]) {
+                      groups[proc] = [];
+                    }
+                    groups[proc].push(log);
+                  });
 
-                      const levelColor = levelColors[log.level] || "#aaa";
-                      const srcColor = sourceColors[log.source] || "#aaa";
+                  const processNames = Object.keys(groups).sort((a, b) => {
+                    if (a === "Система / Глобальные") return 1;
+                    if (b === "Система / Глобальные") return -1;
+                    return a.localeCompare(b);
+                  });
 
-                      return (
-                        <div
-                          key={log.id || idx}
-                          style={{
-                            borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
-                            padding: "4px 0",
-                            display: "flex",
-                            gap: "8px",
-                            alignItems: "flex-start",
-                            transition: "background 0.15s ease",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = "transparent";
-                          }}
-                        >
-                          <span style={{ color: "rgba(255, 255, 255, 0.3)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                            {dateStr} {timeStr}
-                          </span>
-                          <span style={{
-                            color: levelColor,
-                            fontWeight: 700,
-                            flexShrink: 0,
-                            textShadow: `0 0 8px ${levelColor}33`,
-                          }}>
-                            {levelLabels[log.level] || log.level.toUpperCase().padStart(5)}
-                          </span>
-                          <span style={{
-                            color: srcColor,
-                            fontWeight: 600,
-                            flexShrink: 0,
-                            minWidth: "70px",
-                          }}>
-                            {log.source}
-                          </span>
-                          <span style={{
-                            color: "rgba(255, 255, 255, 0.85)",
-                            wordBreak: "break-all",
-                          }}>
-                            {log.message}
-                          </span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                  if (appLogs.length === 0) {
+                    return (
+                      <Text color="dimmed" size="sm" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", padding: "40px 0" }}>
+                        Лог пуст. Ошибки приложения будут отображаться здесь в реальном времени.
+                      </Text>
+                    );
+                  }
+
+                  const renderConsoleLogs = (logs: LogEntry[]) => {
+                    return (
+                      <div style={{
+                        background: "#050508",
+                        borderRadius: "6px",
+                        padding: "8px 12px",
+                        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+                        fontSize: "12px",
+                        lineHeight: "1.7",
+                        marginTop: "8px",
+                      }}>
+                        {logs.map((log, idx) => {
+                          const date = new Date(log.timestamp);
+                          const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+                          const dateStr = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+                          const levelColors: Record<string, string> = {
+                            error: "#ff4757",
+                            warn: "#ffa502",
+                            info: "#70a1ff",
+                          };
+                          const levelLabels: Record<string, string> = {
+                            error: "ERROR",
+                            warn: " WARN",
+                            info: " INFO",
+                          };
+                          const sourceColors: Record<string, string> = {
+                            relay: "#00d2d3",
+                            windivert: "#a78bfa",
+                            engine: "#60a5fa",
+                            system: "#78909c",
+                          };
+                          const levelColor = levelColors[log.level] || "#aaa";
+                          const srcColor = sourceColors[log.source] || "#aaa";
+
+                          return (
+                            <div
+                              key={log.id || idx}
+                              style={{
+                                borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
+                                padding: "4px 0",
+                                display: "flex",
+                                gap: "8px",
+                                alignItems: "flex-start",
+                              }}
+                            >
+                              <span style={{ color: "rgba(255, 255, 255, 0.3)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                                {dateStr} {timeStr}
+                              </span>
+                              <span style={{
+                                color: levelColor,
+                                fontWeight: 700,
+                                flexShrink: 0,
+                                textShadow: `0 0 8px ${levelColor}33`,
+                              }}>
+                                {levelLabels[log.level] || log.level.toUpperCase().padStart(5)}
+                              </span>
+                              <span style={{
+                                color: srcColor,
+                                fontWeight: 600,
+                                flexShrink: 0,
+                                minWidth: "70px",
+                              }}>
+                                {log.source}
+                              </span>
+                              <span style={{
+                                color: "rgba(255, 255, 255, 0.85)",
+                                wordBreak: "break-all",
+                              }}>
+                                {log.message}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <Accordion
+                      variant="separated"
+                      defaultValue={processNames[0]}
+                      styles={{
+                        item: {
+                          background: "rgba(255, 255, 255, 0.01)",
+                          border: "1px solid var(--glass-border)",
+                          borderRadius: "8px",
+                          marginBottom: "10px",
+                          overflow: "hidden",
+                          transition: "all 0.2s ease",
+                          "&[data-active]": {
+                            background: "rgba(255, 255, 255, 0.03)",
+                            borderColor: "rgba(124, 58, 237, 0.3)",
+                            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+                          }
+                        },
+                        control: {
+                          padding: "12px 16px",
+                          "&:hover": {
+                            background: "rgba(255, 255, 255, 0.02)",
+                          }
+                        },
+                        content: {
+                          padding: "0 16px 16px 16px",
+                          background: "rgba(0, 0, 0, 0.15)",
+                        }
+                      }}
+                    >
+                      {processNames.map((procName) => {
+                        const procLogs = groups[procName];
+                        const errs = procLogs.filter((l) => l.level === "error").length;
+                        const warns = procLogs.filter((l) => l.level === "warn").length;
+
+                        return (
+                          <Accordion.Item key={procName} value={procName}>
+                            <Accordion.Control>
+                              <Group justify="space-between" wrap="nowrap" style={{ width: "100%", paddingRight: "16px" }}>
+                                <Group gap="xs" wrap="nowrap">
+                                  <ThemeIcon size="sm" color="violet" variant="light">
+                                    <IconTerminal2 size={12} />
+                                  </ThemeIcon>
+                                  <Text fw={600} size="sm" style={{ color: "#ffffff" }}>
+                                    {procName}
+                                  </Text>
+                                </Group>
+                                <Group gap="xs" style={{ flexShrink: 0 }}>
+                                  {errs > 0 && (
+                                    <Badge color="red" variant="filled" size="xs">
+                                      {errs} {errs === 1 ? "ошибка" : errs < 5 ? "ошибки" : "ошибок"}
+                                    </Badge>
+                                  )}
+                                  {warns > 0 && (
+                                    <Badge color="orange" variant="filled" size="xs">
+                                      {warns} {warns === 1 ? "предупреждение" : warns < 5 ? "предупреждения" : "предупреждений"}
+                                    </Badge>
+                                  )}
+                                  <Badge color="gray" variant="light" size="xs">
+                                    Всего: {procLogs.length}
+                                  </Badge>
+                                </Group>
+                              </Group>
+                            </Accordion.Control>
+                            <Accordion.Panel>
+                              {renderConsoleLogs(procLogs)}
+                            </Accordion.Panel>
+                          </Accordion.Item>
+                        );
+                      })}
+                    </Accordion>
+                  );
+                })() : (
+                  <div style={{
+                    background: "#0a0a0f",
+                    borderRadius: "8px",
+                    border: "1px solid rgba(255, 255, 255, 0.06)",
+                    padding: "12px",
+                    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+                    fontSize: "12px",
+                    lineHeight: "1.8",
+                    minHeight: "300px",
+                  }}>
+                    {appLogs.length === 0 ? (
+                      <Text color="dimmed" size="sm" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", padding: "40px 0" }}>
+                        Лог пуст. Ошибки приложения будут отображаться здесь в реальном времени.
+                      </Text>
+                    ) : (
+                      appLogs.map((log, idx) => {
+                        const date = new Date(log.timestamp);
+                        const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+                        const dateStr = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+                        const levelColors: Record<string, string> = {
+                          error: "#ff4757",
+                          warn: "#ffa502",
+                          info: "#70a1ff",
+                        };
+                        const levelLabels: Record<string, string> = {
+                          error: "ERROR",
+                          warn: " WARN",
+                          info: " INFO",
+                        };
+                        const sourceColors: Record<string, string> = {
+                          relay: "#00d2d3",
+                          windivert: "#a78bfa",
+                          engine: "#60a5fa",
+                          system: "#78909c",
+                        };
+                        const levelColor = levelColors[log.level] || "#aaa";
+                        const srcColor = sourceColors[log.source] || "#aaa";
+
+                        return (
+                          <div
+                            key={log.id || idx}
+                            style={{
+                              borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
+                              padding: "4px 0",
+                              display: "flex",
+                              gap: "8px",
+                              alignItems: "flex-start",
+                              transition: "background 0.15s ease",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            <span style={{ color: "rgba(255, 255, 255, 0.3)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                              {dateStr} {timeStr}
+                            </span>
+                            <span style={{
+                              color: levelColor,
+                              fontWeight: 700,
+                              flexShrink: 0,
+                              textShadow: `0 0 8px ${levelColor}33`,
+                            }}>
+                              {levelLabels[log.level] || log.level.toUpperCase().padStart(5)}
+                            </span>
+                            <span style={{
+                              color: srcColor,
+                              fontWeight: 600,
+                              flexShrink: 0,
+                              minWidth: "70px",
+                            }}>
+                              {log.source}
+                            </span>
+                            {log.process_name && (
+                              <Badge size="xs" color="violet" variant="outline" style={{ flexShrink: 0, textTransform: "none" }}>
+                                {log.process_name}
+                              </Badge>
+                            )}
+                            <span style={{
+                              color: "rgba(255, 255, 255, 0.85)",
+                              wordBreak: "break-all",
+                            }}>
+                              {log.message}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </ScrollArea>
             </Card>
           </Stack>
@@ -2364,69 +2623,9 @@ function App() {
           </Stack>
         )}
 
-        {/* TAB: Settings */}
-        {activeTab === "settings" && (
+        {/* TAB: Proxy Settings */}
+        {activeTab === "proxy_settings" && (
           <Stack gap="lg">
-            {/* Engine Options */}
-            <Card radius="md" p="md" className="glass-panel">
-              <Title order={4} mb="md" style={{ fontFamily: "Outfit, sans-serif" }}>
-                НАСТРОЙКИ МАРШРУТИЗАЦИИ
-              </Title>
-              <Divider mb="md" color="var(--glass-border)" />
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
-                <Switch
-                  label="Пускать DNS-запросы через прокси"
-                  checked={proxyDns}
-                  onChange={(e) => {
-                    const val = e.currentTarget.checked;
-                    setProxyDns(val);
-                    handleSaveSettings(val, bypassLocal, autostart, minimizeToTray, startMinimized);
-                  }}
-                  size="md"
-                  color="violet"
-                />
-                <Switch
-                  label="Обходить локальные адреса (Intranet/Bypass Local)"
-                  checked={bypassLocal}
-                  onChange={(e) => {
-                    const val = e.currentTarget.checked;
-                    setBypassLocal(val);
-                    handleSaveSettings(proxyDns, val, autostart, minimizeToTray, startMinimized);
-                  }}
-                  size="md"
-                  color="violet"
-                />
-              </SimpleGrid>
-            </Card>
-
-            {/* System Update Card */}
-            <Card radius="md" p="md" className="glass-panel">
-              <Title order={4} mb="md" style={{ fontFamily: "Outfit, sans-serif" }}>
-                ОБНОВЛЕНИЕ СИСТЕМЫ
-              </Title>
-              <Divider mb="md" color="var(--glass-border)" />
-              <Group justify="space-between" align="center">
-                <div>
-                  <Text size="sm" color="dimmed">
-                    Текущая версия приложения: <b>v{appVersion}</b>
-                  </Text>
-                  <Text size="xs" color="dimmed" mt="xs">
-                    При выходе нового релиза на GitHub вы сможете обновить приложение в один клик.
-                  </Text>
-                </div>
-                <Button
-                  onClick={() => handleManualUpdateCheck(false)}
-                  loading={isCheckingUpdate}
-                  radius="md"
-                  color="violet"
-                  leftSection={<IconRefresh size={16} />}
-                  className="interactive-element"
-                >
-                  Проверить обновления
-                </Button>
-              </Group>
-            </Card>
-
             <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
               {/* Proxy List */}
               <Card radius="md" p="md" className="glass-panel">
@@ -2594,6 +2793,263 @@ function App() {
               </Card>
             </SimpleGrid>
           </Stack>
+        )}
+
+        {/* TAB: App Settings */}
+        {activeTab === "settings" && (
+          <Tabs defaultValue="general" color="violet" variant="outline" styles={{
+            root: {
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            },
+            tab: {
+              borderBottomWidth: '2px',
+              padding: '12px 18px',
+              fontWeight: 600,
+              fontSize: '14px',
+              color: 'rgba(255, 255, 255, 0.65)',
+              transition: 'all 0.15s ease',
+              '&:hover': {
+                color: '#ffffff',
+                background: 'rgba(255, 255, 255, 0.02)',
+              },
+              '&[data-active]': {
+                color: '#ffffff',
+                borderColor: '#7c3aed',
+              }
+            },
+            panel: {
+              paddingTop: '8px',
+            }
+          }}>
+            <Tabs.List style={{ borderBottom: '1px solid var(--glass-border)' }}>
+              <Tabs.Tab value="general" leftSection={<IconSettings size={16} />}>
+                Основные
+              </Tabs.Tab>
+              <Tabs.Tab value="changelog" leftSection={<IconHistory size={16} />}>
+                История изменений
+              </Tabs.Tab>
+            </Tabs.List>
+
+            <Tabs.Panel value="general">
+              <Stack gap="lg">
+                {/* Engine Options */}
+                <Card radius="md" p="md" className="glass-panel">
+                  <Title order={4} mb="md" style={{ fontFamily: "Outfit, sans-serif" }}>
+                    НАСТРОЙКИ МАРШРУТИЗАЦИИ
+                  </Title>
+                  <Divider mb="md" color="var(--glass-border)" />
+                  <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+                    <Switch
+                      label="Пускать DNS-запросы через прокси"
+                      checked={proxyDns}
+                      onChange={(e) => {
+                        const val = e.currentTarget.checked;
+                        setProxyDns(val);
+                        handleSaveSettings(val, bypassLocal, autostart, minimizeToTray, startMinimized);
+                      }}
+                      size="md"
+                      color="violet"
+                    />
+                    <Switch
+                      label="Обходить локальные адреса (Intranet/Bypass Local)"
+                      checked={bypassLocal}
+                      onChange={(e) => {
+                        const val = e.currentTarget.checked;
+                        setBypassLocal(val);
+                        handleSaveSettings(proxyDns, val, autostart, minimizeToTray, startMinimized);
+                      }}
+                      size="md"
+                      color="violet"
+                    />
+                  </SimpleGrid>
+                </Card>
+
+                {/* Autostart/Window options */}
+                <Card radius="md" p="md" className="glass-panel">
+                  <Title order={4} mb="md" style={{ fontFamily: "Outfit, sans-serif" }}>
+                    ПАРАМЕТРЫ ЗАПУСКА СИСТЕМЫ
+                  </Title>
+                  <Divider mb="md" color="var(--glass-border)" />
+                  <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
+                    <Switch
+                      label="Запускать с системой"
+                      checked={autostart}
+                      onChange={(e) => {
+                        const val = e.currentTarget.checked;
+                        setAutostart(val);
+                        handleSaveSettings(proxyDns, bypassLocal, val, minimizeToTray, startMinimized);
+                      }}
+                      size="md"
+                      color="violet"
+                    />
+
+                    <Switch
+                      label="Сворачивать при закрытии"
+                      checked={minimizeToTray}
+                      onChange={(e) => {
+                        const val = e.currentTarget.checked;
+                        setMinimizeToTray(val);
+                        handleSaveSettings(proxyDns, bypassLocal, autostart, val, startMinimized);
+                      }}
+                      size="md"
+                      color="violet"
+                    />
+
+                    <Switch
+                      label="Запускать свернутым в трее"
+                      checked={startMinimized}
+                      onChange={(e) => {
+                        const val = e.currentTarget.checked;
+                        setStartMinimized(val);
+                        handleSaveSettings(proxyDns, bypassLocal, autostart, minimizeToTray, val);
+                      }}
+                      size="md"
+                      color="violet"
+                    />
+                  </SimpleGrid>
+                </Card>
+
+                {/* System Update Card */}
+                <Card radius="md" p="md" className="glass-panel">
+                  <Title order={4} mb="md" style={{ fontFamily: "Outfit, sans-serif" }}>
+                    ОБНОВЛЕНИЕ СИСТЕМЫ
+                  </Title>
+                  <Divider mb="md" color="var(--glass-border)" />
+                  <Group justify="space-between" align="center">
+                    <div>
+                      <Text size="sm" color="dimmed">
+                        Текущая версия приложения: <b>v{appVersion}</b>
+                      </Text>
+                      <Text size="xs" color="dimmed" mt="xs">
+                        При выходе нового релиза на GitHub вы сможете обновить приложение в один клик.
+                      </Text>
+                    </div>
+                    <Button
+                      onClick={() => handleManualUpdateCheck(false)}
+                      loading={isCheckingUpdate}
+                      radius="md"
+                      color="violet"
+                      leftSection={<IconRefresh size={16} />}
+                      className="interactive-element"
+                    >
+                      Проверить обновления
+                    </Button>
+                  </Group>
+                </Card>
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="changelog">
+              <Card radius="md" p="md" className="glass-panel">
+                <Group justify="space-between" mb="md" align="center">
+                  <div>
+                    <Title order={4} style={{ fontFamily: "Outfit, sans-serif" }}>
+                      ИСТОРИЯ ИЗМЕНЕНИЙ (CHANGELOG)
+                    </Title>
+                    <Text size="xs" color="dimmed" mt="xs">
+                      Официальные релизы из репозитория GitHub
+                    </Text>
+                  </div>
+                  <Badge size="lg" color="violet" variant="light">
+                    Текущая версия: v{appVersion}
+                  </Badge>
+                </Group>
+                <Divider mb="md" color="var(--glass-border)" />
+
+                {isLoadingReleases ? (
+                  <Stack gap="sm" py="xl">
+                    <Skeleton height={40} radius="md" />
+                    <Skeleton height={20} radius="md" />
+                    <Skeleton height={20} radius="md" />
+                    <Skeleton height={20} width="70%" radius="md" />
+                    <Divider my="md" color="rgba(255, 255, 255, 0.05)" />
+                    <Skeleton height={40} radius="md" />
+                    <Skeleton height={20} radius="md" />
+                  </Stack>
+                ) : releasesError ? (
+                  <Stack align="center" py="xl" gap="sm">
+                    <Text color="red" size="sm">
+                      {releasesError}
+                    </Text>
+                    <Button variant="light" color="violet" size="xs" onClick={fetchReleases}>
+                      Повторить загрузку
+                    </Button>
+                  </Stack>
+                ) : releases.length === 0 ? (
+                  <Text color="dimmed" size="sm" style={{ textAlign: 'center' }} py="xl">
+                    История изменений пуста или не загружена.
+                  </Text>
+                ) : (
+                  <ScrollArea h={500} scrollbarSize={6}>
+                    <Stack gap="lg" pr="md">
+                      {releases.map((rel) => {
+                        const date = new Date(rel.published_at);
+                        const dateStr = date.toLocaleDateString("ru-RU", {
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        });
+                        return (
+                          <Paper
+                            key={rel.id}
+                            p="md"
+                            radius="md"
+                            style={{
+                              background: "rgba(255, 255, 255, 0.01)",
+                              border: "1px solid var(--glass-border)",
+                              transition: "all 0.15s ease",
+                            }}
+                          >
+                            <Group justify="space-between" mb="xs">
+                              <Group gap="xs">
+                                <Text fw={700} size="md" color="violet">
+                                  {rel.name || rel.tag_name}
+                                </Text>
+                                {appVersion === rel.tag_name.replace(/^v/, "") && (
+                                  <Badge size="xs" color="teal">Текущая версия</Badge>
+                                )}
+                              </Group>
+                              <Text size="xs" color="dimmed">
+                                {dateStr}
+                              </Text>
+                            </Group>
+                            <Text
+                              size="sm"
+                              style={{
+                                whiteSpace: "pre-wrap",
+                                fontFamily: "sans-serif",
+                                color: "rgba(255, 255, 255, 0.85)",
+                                lineHeight: "1.6",
+                              }}
+                            >
+                              {rel.body}
+                            </Text>
+                            <Divider my="sm" color="rgba(255, 255, 255, 0.05)" />
+                            <Group justify="flex-end">
+                              <Button
+                                component="a"
+                                href={rel.html_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                size="xs"
+                                variant="subtle"
+                                color="violet"
+                                rightSection={<IconArrowUpRight size={12} />}
+                              >
+                                Открыть на GitHub
+                              </Button>
+                            </Group>
+                          </Paper>
+                        );
+                      })}
+                    </Stack>
+                  </ScrollArea>
+                )}
+              </Card>
+            </Tabs.Panel>
+          </Tabs>
         )}
       </AppShell.Main>
     </AppShell>

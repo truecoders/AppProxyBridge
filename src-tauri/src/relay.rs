@@ -6,9 +6,9 @@ use crate::proxy_core::{EngineState, LogEntry};
 use tauri::{AppHandle, Emitter};
 
 /// Helper: log to DB and emit event to frontend
-fn emit_log(db_path: &PathBuf, app: &AppHandle, level: &str, source: &str, message: &str) {
+fn emit_log(db_path: &PathBuf, app: &AppHandle, level: &str, source: &str, message: &str, process_name: Option<&str>) {
     if let Ok(conn) = crate::database::init_db(db_path.clone()) {
-        let _ = crate::database::insert_log(&conn, level, source, message);
+        let _ = crate::database::insert_log(&conn, level, source, message, process_name);
     }
     let log_entry = LogEntry {
         id: 0,
@@ -16,6 +16,7 @@ fn emit_log(db_path: &PathBuf, app: &AppHandle, level: &str, source: &str, messa
         level: level.to_string(),
         source: source.to_string(),
         message: message.to_string(),
+        process_name: process_name.map(|s| s.to_string()),
     };
     let _ = app.emit("log-event", log_entry);
 }
@@ -27,7 +28,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle, db_path: P
     let listener = match TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            emit_log(&db_path, &app, "error", "relay", &format!("Failed to bind TCP relay listener to {}: {:?}", addr, e));
+            emit_log(&db_path, &app, "error", "relay", &format!("Failed to bind TCP relay listener to {}: {:?}", addr, e), None);
             return;
         }
     };
@@ -112,7 +113,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle, db_path: P
                                     }
                                 }
                                 Err(handshake_err) => {
-                                    emit_log(&db_clone, &app_clone, "error", "relay", &format!("Proxy handshake failed for upstream {}: {:?}", proxy_addr, handshake_err));
+                                    emit_log(&db_clone, &app_clone, "error", "relay", &format!("Proxy handshake failed for upstream {}: {:?}", proxy_addr, handshake_err), Some(&process_name));
                                     // Emit closed event on handshake failure
                                     let conn_event = crate::proxy_core::ConnectionInfo {
                                         id: connection_id.clone(),
@@ -132,7 +133,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle, db_path: P
                             }
                         }
                         Err(e) => {
-                            emit_log(&db_clone, &app_clone, "error", "relay", &format!("Failed to connect to upstream proxy at {}: {:?}", proxy_addr, e));
+                             emit_log(&db_clone, &app_clone, "error", "relay", &format!("Failed to connect to upstream proxy at {}: {:?}", proxy_addr, e), Some(&process_name));
                             // Emit closed event
                             let conn_event = crate::proxy_core::ConnectionInfo {
                                 id: connection_id.clone(),
@@ -183,7 +184,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle, db_path: P
                             }
                         }
                         Err(e) => {
-                            emit_log(&db_clone, &app_clone, "warn", "relay", &format!("Direct fallback connection failed to {}: {:?}", dest_addr, e));
+                             emit_log(&db_clone, &app_clone, "warn", "relay", &format!("Direct fallback connection failed to {}: {:?}", dest_addr, e), Some(&process_name));
                         }
                     }
                 }
