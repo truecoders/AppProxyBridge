@@ -404,11 +404,29 @@ function App() {
     body: string;
     html_url: string;
   }
-  const [releases, setReleases] = useState<GitHubRelease[]>([]);
+  const [releases, setReleases] = useState<GitHubRelease[]>(() => {
+    const cached = localStorage.getItem("github_releases_cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (_) {}
+    }
+    return [];
+  });
   const [isLoadingReleases, setIsLoadingReleases] = useState(false);
   const [releasesError, setReleasesError] = useState<string | null>(null);
 
-  const fetchReleases = async () => {
+  const fetchReleases = async (force: boolean = false) => {
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const cachedTime = localStorage.getItem("github_releases_cache_time");
+
+    // Если обновление не принудительное, кэш свежий (< 24ч) и данные есть, не делаем запрос
+    if (!force && cachedTime && (now - parseInt(cachedTime, 10) < oneDay) && releases.length > 0) {
+      return;
+    }
+
     setIsLoadingReleases(true);
     setReleasesError(null);
     try {
@@ -425,8 +443,14 @@ function App() {
       }
       const data = await response.json();
       setReleases(data);
+      localStorage.setItem("github_releases_cache", JSON.stringify(data));
+      localStorage.setItem("github_releases_cache_time", now.toString());
     } catch (err: any) {
-      setReleasesError(`Ошибка загрузки: ${err.message || "Не удалось загрузить историю изменений"}`);
+      if (releases.length > 0) {
+        console.warn("Не удалось обновить список релизов с GitHub:", err.message);
+      } else {
+        setReleasesError(`Ошибка загрузки: ${err.message || "Не удалось загрузить историю изменений"}`);
+      }
     } finally {
       setIsLoadingReleases(false);
     }
@@ -3227,7 +3251,7 @@ function App() {
                     <Text color="red" size="sm">
                       {releasesError}
                     </Text>
-                    <Button variant="light" color="violet" size="xs" onClick={fetchReleases}>
+                    <Button variant="light" color="violet" size="xs" onClick={() => fetchReleases(true)}>
                       Повторить загрузку
                     </Button>
                   </Stack>
