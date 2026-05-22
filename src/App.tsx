@@ -1460,6 +1460,7 @@ function App() {
                       color="violet"
                       size="lg"
                       radius="md"
+                      aria-label="Обновить и переупорядочить список процессов"
                       onClick={() => setRefreshNonce((n) => n + 1)}
                       style={{ height: "36px", width: "36px" }}
                     >
@@ -1599,6 +1600,7 @@ function App() {
                                   color={action.color}
                                   size="sm"
                                   radius="md"
+                                  aria-label={action.tooltip}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleSetProcessGroup(procName, action.key);
@@ -2145,6 +2147,7 @@ function App() {
                     color="red"
                     size="lg"
                     radius="md"
+                    aria-label="Очистить все логи"
                     onClick={handleClearLogs}
                     disabled={appLogs.length === 0}
                   >
@@ -2348,6 +2351,7 @@ function App() {
                             <ActionIcon
                               color="red"
                               variant="subtle"
+                              aria-label="Удалить правило"
                               onClick={() => handleDeleteRule(rule.id)}
                               className="interactive-element"
                             >
@@ -2455,6 +2459,7 @@ function App() {
                             <Group gap="xs">
                               <ActionIcon
                                 variant="transparent"
+                                aria-label={p.is_primary ? "Убрать из основных прокси" : "Сделать основным прокси"}
                                 onClick={() => handleSetPrimaryProxy(p.id)}
                                 color={p.is_primary ? "yellow" : "gray"}
                               >
@@ -2475,6 +2480,7 @@ function App() {
                               <ActionIcon
                                 color="red"
                                 variant="subtle"
+                                aria-label="Удалить прокси"
                                 onClick={() => handleDeleteProxy(p.id)}
                               >
                                 <IconTrash size={16} />
