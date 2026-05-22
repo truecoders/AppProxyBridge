@@ -360,37 +360,42 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
             match handle.recv(Some(&mut packet_buffer)) {
                 Ok(mut packet) => {
                     // Process the packet
-                    if let Err(e) = process_diverted_packet_sync(&mut packet, state_clone.clone(), app_clone.clone()) {
-                        let msg = format!("Error processing packet: {:?}", e);
-                        if let Ok(conn) = crate::database::init_db(db_path.clone()) {
-                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
+                    match process_diverted_packet_sync(&mut packet, state_clone.clone(), app_clone.clone()) {
+                        Ok(reinject) => {
+                            if reinject {
+                                // Re-inject the packet (modified or unmodified)
+                                if let Err(e) = handle.send(&packet) {
+                                    let msg = format!("WinDivert send error: {:?}", e);
+                                    if let Ok(conn) = crate::database::init_db(db_path.clone()) {
+                                        let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
+                                    }
+                                    let log_entry = LogEntry {
+                                        id: 0,
+                                        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                                        level: "error".to_string(),
+                                        source: "windivert".to_string(),
+                                        message: msg,
+                                        process_name: None,
+                                    };
+                                    let _ = app_clone.emit("log-event", log_entry);
+                                }
+                            }
                         }
-                        let log_entry = LogEntry {
-                            id: 0,
-                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
-                            level: "error".to_string(),
-                            source: "windivert".to_string(),
-                            message: msg,
-                            process_name: None,
-                        };
-                        let _ = app_clone.emit("log-event", log_entry);
-                    }
-                    
-                    // Re-inject the packet (modified or unmodified)
-                    if let Err(e) = handle.send(&packet) {
-                        let msg = format!("WinDivert send error: {:?}", e);
-                        if let Ok(conn) = crate::database::init_db(db_path.clone()) {
-                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
+                        Err(e) => {
+                            let msg = format!("Error processing packet: {:?}", e);
+                            if let Ok(conn) = crate::database::init_db(db_path.clone()) {
+                                let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
+                            }
+                            let log_entry = LogEntry {
+                                id: 0,
+                                timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                                level: "error".to_string(),
+                                source: "windivert".to_string(),
+                                message: msg,
+                                process_name: None,
+                            };
+                            let _ = app_clone.emit("log-event", log_entry);
                         }
-                        let log_entry = LogEntry {
-                            id: 0,
-                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
-                            level: "error".to_string(),
-                            source: "windivert".to_string(),
-                            message: msg,
-                            process_name: None,
-                        };
-                        let _ = app_clone.emit("log-event", log_entry);
                     }
                 }
                 Err(e) => {
@@ -440,12 +445,12 @@ fn process_diverted_packet_sync(
     packet: &mut WinDivertPacket<'_, NetworkLayer>,
     state: Arc<EngineState>,
     app: AppHandle
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
     // 1. Get raw packet data slice from the data field
     let packet_data: &mut [u8] = packet.data.to_mut();
     
     if packet_data.len() < 20 {
-        return Ok(());
+        return Ok(true);
     }
     
     let ip_version = packet_data[0] >> 4;
@@ -475,28 +480,28 @@ fn process_diverted_packet_sync(
         src_ip = IpAddr::V6(src_bytes.into());
         dest_ip = IpAddr::V6(dest_bytes.into());
     } else {
-        return Ok(());
+        return Ok(true);
     }
     
     let is_tcp = proto == 6;
     let is_udp = proto == 17;
     
     if !is_tcp && !is_udp {
-        return Ok(());
+        return Ok(true);
     }
     
     let src_port_offset = header_len;
     let dest_port_offset = header_len + 2;
     
     if packet_data.len() < src_port_offset + 4 {
-        return Ok(());
+        return Ok(true);
     }
     
     let src_port = u16::from_be_bytes([packet_data[src_port_offset], packet_data[src_port_offset + 1]]);
     let dest_port = u16::from_be_bytes([packet_data[dest_port_offset], packet_data[dest_port_offset + 1]]);
     
     let local_relay_port: u16 = if is_tcp { 34020 } else { 34021 };
-
+ 
     // --- REVERSE NAT FOR OUTBOUND PACKETS FROM OUR RELAY (REFLECTION) ---
     if src_port == local_relay_port && packet.address.outbound() {
         let mapping = {
@@ -545,15 +550,15 @@ fn process_diverted_packet_sync(
             // Recalculate checksums and update address checksum flags
             let _ = packet.recalculate_checksums(windivert_sys::ChecksumFlags::new());
             
-            return Ok(());
+            return Ok(true);
         }
     }
     
     // --- PREVENT INFINITE LOOP FOR RELAY TRAFFIC ---
     if dest_port == local_relay_port {
-        return Ok(());
+        return Ok(true);
     }
-
+ 
     let is_inbound = !packet.address.outbound();
     if is_inbound {
         // Best-effort: try to resolve process for inbound packets and accumulate bytes_received
@@ -567,15 +572,15 @@ fn process_diverted_packet_sync(
             entry.1 += packet_len;
             entry.2 = current_time;
         }
-        return Ok(());
+        return Ok(true);
     }
-
+ 
     // 2. Resolve process name (sync version)
     let (pid, process_name) = resolve_process_for_port_sync(src_port, is_tcp, &state);
     
     let process_lower = process_name.to_lowercase();
     if process_name == "Unknown" || process_lower.contains("appproxybridge") || process_lower.contains("proxier") {
-        return Ok(());
+        return Ok(true);
     }
     
     
@@ -644,7 +649,7 @@ fn process_diverted_packet_sync(
         entry.0 += packet_data.len() as u64;
         entry.2 = current_time;
     }
-
+ 
     // 4. Execute matched action
     match matching_action {
         RuleAction::Block => {
@@ -652,14 +657,14 @@ fn process_diverted_packet_sync(
             conn_info.status = "Blocked".to_string();
             let _ = state.event_sender.send(conn_info.clone());
             let _ = app.emit("connection-event", conn_info);
-            return Err("Packet Blocked".into()); // Skip reinjection
+            return Ok(false); // Skip reinjection
         }
         RuleAction::Direct => {
             let _ = state.event_sender.send(connection_event.clone());
             let _ = app.emit("connection-event", connection_event);
         }
         RuleAction::Proxy => {
-
+ 
             // Set impostor to true so this packet is ignored by WinDivert after reinjection
             packet.address.set_impostor(true);
             
@@ -690,7 +695,7 @@ fn process_diverted_packet_sync(
             let port_bytes = local_relay_port.to_be_bytes();
             packet_data[dest_port_offset] = port_bytes[0];
             packet_data[dest_port_offset + 1] = port_bytes[1];
-
+ 
             // Reflect: Swap Source IP and Destination IP
             match dest_ip {
                 IpAddr::V4(_) => {
@@ -718,7 +723,7 @@ fn process_diverted_packet_sync(
             };
             
             packet.address.set_outbound(false);
-
+ 
             // Recalculate checksums after modifying packet headers and update address checksum flags
             let _ = packet.recalculate_checksums(windivert_sys::ChecksumFlags::new());
             
@@ -728,7 +733,7 @@ fn process_diverted_packet_sync(
     }
     
     
-    Ok(())
+    Ok(true)
 }
 
 pub fn get_active_system_connections(state: &EngineState) -> Vec<ConnectionInfo> {

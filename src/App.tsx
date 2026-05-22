@@ -34,6 +34,8 @@ import {
   Tabs,
   SegmentedControl,
   Skeleton,
+  Anchor,
+  List,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -164,12 +166,234 @@ function formatConnectionTime(timestampMs: number): string {
   return timeStr;
 }
 
+function renderMarkdown(text: string): React.ReactNode {
+  if (!text) return null;
+
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let currentListItems: React.ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeBlockLines: string[] = [];
+
+  const flushList = (key: string | number) => {
+    if (currentListItems.length > 0) {
+      elements.push(
+        <List key={`list-${key}`} size="sm" withPadding style={{ color: "rgba(255, 255, 255, 0.85)" }}>
+          {currentListItems}
+        </List>
+      );
+      currentListItems = [];
+    }
+  };
+
+  const parseInlineStyles = (lineText: string): React.ReactNode[] => {
+    const tokens: React.ReactNode[] = [];
+    let remaining = lineText;
+    let index = 0;
+
+    while (remaining.length > 0) {
+      const boldIdx = remaining.indexOf("**");
+      const codeIdx = remaining.indexOf("`");
+      const linkIdx = remaining.indexOf("[");
+
+      const indices = [
+        { type: "bold", idx: boldIdx },
+        { type: "code", idx: codeIdx },
+        { type: "link", idx: linkIdx },
+      ].filter(item => item.idx !== -1);
+
+      if (indices.length === 0) {
+        tokens.push(<span key={index++}>{remaining}</span>);
+        break;
+      }
+
+      indices.sort((a, b) => a.idx - b.idx);
+      const first = indices[0];
+
+      if (first.idx > 0) {
+        tokens.push(<span key={index++}>{remaining.substring(0, first.idx)}</span>);
+      }
+
+      remaining = remaining.substring(first.idx);
+
+      if (first.type === "bold") {
+        const nextBold = remaining.indexOf("**", 2);
+        if (nextBold !== -1) {
+          const content = remaining.substring(2, nextBold);
+          tokens.push(<strong key={index++} style={{ fontWeight: 700, color: "#fff" }}>{content}</strong>);
+          remaining = remaining.substring(nextBold + 2);
+        } else {
+          tokens.push(<span key={index++}>**</span>);
+          remaining = remaining.substring(2);
+        }
+      } else if (first.type === "code") {
+        const nextCode = remaining.indexOf("`", 1);
+        if (nextCode !== -1) {
+          const content = remaining.substring(1, nextCode);
+          tokens.push(
+            <code
+              key={index++}
+              style={{
+                fontFamily: "monospace",
+                background: "rgba(255, 255, 255, 0.08)",
+                padding: "2px 6px",
+                borderRadius: "4px",
+                fontSize: "0.9em",
+                color: "#ff7b72",
+              }}
+            >
+              {content}
+            </code>
+          );
+          remaining = remaining.substring(nextCode + 1);
+        } else {
+          tokens.push(<span key={index++}>`</span>);
+          remaining = remaining.substring(1);
+        }
+      } else if (first.type === "link") {
+        const linkEnd = remaining.indexOf("]");
+        if (linkEnd !== -1 && remaining.charAt(linkEnd + 1) === "(") {
+          const urlEnd = remaining.indexOf(")", linkEnd + 2);
+          if (urlEnd !== -1) {
+            const linkText = remaining.substring(1, linkEnd);
+            const url = remaining.substring(linkEnd + 2, urlEnd);
+            tokens.push(
+              <Anchor
+                key={index++}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                color="violet"
+                underline="hover"
+                style={{ fontSize: "inherit" }}
+              >
+                {linkText}
+              </Anchor>
+            );
+            remaining = remaining.substring(urlEnd + 1);
+            continue;
+          }
+        }
+        tokens.push(<span key={index++}>[</span>);
+        remaining = remaining.substring(1);
+      }
+    }
+
+    return tokens;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.trim().startsWith("```")) {
+      if (inCodeBlock) {
+        elements.push(
+          <Paper
+            key={`codeblock-${i}`}
+            p="sm"
+            radius="sm"
+            style={{
+              background: "rgba(0, 0, 0, 0.3)",
+              border: "1px solid rgba(255, 255, 255, 0.05)",
+              fontFamily: "monospace",
+              fontSize: "0.85em",
+              color: "#e6edf3",
+              whiteSpace: "pre",
+              overflowX: "auto",
+              margin: "8px 0",
+            }}
+          >
+            {codeBlockLines.join("\n")}
+          </Paper>
+        );
+        codeBlockLines = [];
+        inCodeBlock = false;
+      } else {
+        flushList(i);
+        inCodeBlock = true;
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBlockLines.push(line);
+      continue;
+    }
+
+    const listMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
+    if (listMatch) {
+      const content = listMatch[2];
+      currentListItems.push(
+        <List.Item key={`li-${i}`}>
+          {parseInlineStyles(content)}
+        </List.Item>
+      );
+      continue;
+    }
+
+    flushList(i);
+
+    const headerMatch = line.match(/^(#{1,6})\s+(.*)/);
+    if (headerMatch) {
+      const level = headerMatch[1].length;
+      const content = headerMatch[2];
+      let order: 1 | 2 | 3 | 4 | 5 | 6 = 4;
+      if (level === 1) order = 3;
+      else if (level === 2) order = 4;
+      else if (level === 3) order = 5;
+      else order = 6;
+
+      elements.push(
+        <Title
+          key={`h-${i}`}
+          order={order}
+          mt={level === 1 ? "md" : "sm"}
+          mb="xs"
+          style={{
+            fontFamily: "Outfit, sans-serif",
+            color: "#fff",
+            borderBottom: level <= 2 ? "1px solid rgba(255, 255, 255, 0.1)" : "none",
+            paddingBottom: level <= 2 ? "4px" : "0",
+          }}
+        >
+          {parseInlineStyles(content)}
+        </Title>
+      );
+      continue;
+    }
+
+    if (line.trim() === "") {
+      elements.push(<div key={`space-${i}`} style={{ height: "8px" }} />);
+      continue;
+    }
+
+    elements.push(
+      <Text
+        key={`p-${i}`}
+        size="sm"
+        style={{
+          color: "rgba(255, 255, 255, 0.85)",
+          lineHeight: "1.6",
+          marginBottom: "6px",
+        }}
+      >
+        {parseInlineStyles(line)}
+      </Text>
+    );
+  }
+
+  flushList("end");
+
+  return <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>{elements}</div>;
+}
+
 function App() {
   const [opened, { toggle }] = useDisclosure();
   const [activeTab, setActiveTab] = useState("dashboard");
 
   // Log display settings
   const [logViewMode, setLogViewMode] = useState<string>("all");
+  const [logLevelFilter, setLogLevelFilter] = useState<string>("all");
 
   // GitHub Changelog states
   interface GitHubRelease {
@@ -190,12 +414,19 @@ function App() {
     try {
       const response = await fetch("https://api.github.com/repos/truecoders/AppProxyBridge/releases");
       if (!response.ok) {
-        throw new Error(`Ошибка загрузки: ${response.statusText}`);
+        let errorDetails = "";
+        try {
+          const errJson = await response.json();
+          if (errJson && errJson.message) {
+            errorDetails = `: ${errJson.message}`;
+          }
+        } catch (_) {}
+        throw new Error(`Код ${response.status}${errorDetails || (response.statusText ? ` - ${response.statusText}` : "")}`);
       }
       const data = await response.json();
       setReleases(data);
     } catch (err: any) {
-      setReleasesError(err.message || "Не удалось загрузить историю изменений");
+      setReleasesError(`Ошибка загрузки: ${err.message || "Не удалось загрузить историю изменений"}`);
     } finally {
       setIsLoadingReleases(false);
     }
@@ -1138,8 +1369,6 @@ function App() {
     return [...rawNames]
       .filter((procName) => {
         const lower = procName.toLowerCase();
-        // Hide own process from dashboard
-        if (lower.includes("appproxybridge") || lower.includes("proxier")) return false;
         return lower.includes(procSearchQuery.toLowerCase());
       })
       .filter((procName) => {
@@ -1773,16 +2002,15 @@ function App() {
                   style={{
                     background: "rgba(255, 255, 255, 0.02)",
                     border: "1px solid var(--glass-border)",
-                    maxHeight: "250px",
+                    maxHeight: "350px",
                     overflowY: "auto",
-                    whiteSpace: "pre-wrap",
                     fontSize: "13px",
                     lineHeight: "1.6",
                     fontFamily: "Inter, sans-serif",
                     color: "rgba(255, 255, 255, 0.9)"
                   }}
                 >
-                  {updateInfo?.body || "Описания изменений нет."}
+                  {renderMarkdown(updateInfo?.body || "Описания изменений нет.")}
                 </Paper>
 
                 <Group justify="flex-end" mt="md">
@@ -2181,94 +2409,274 @@ function App() {
         </Modal>
 
         {/* TAB: Logs */}
-        {activeTab === "logs" && (
-          <Stack gap="md" style={{ height: "calc(100vh - 92px)", display: "flex", flexDirection: "column" }}>
-            <Card radius="md" p="md" className="glass-panel" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <Group justify="space-between" mb="md" align="center">
-                <Group gap="xs">
-                  <ThemeIcon size="md" variant="gradient" gradient={{ from: "red", to: "orange" }} radius="md">
-                    <IconTerminal2 size={18} />
-                  </ThemeIcon>
-                  <Title order={4} style={{ fontFamily: "Outfit, sans-serif" }}>
-                    СИСТЕМНЫЙ ЛОГ
-                  </Title>
-                  <Badge size="sm" variant="light" color="gray">
-                    {appLogs.length} / 300
-                  </Badge>
-                </Group>
+        {activeTab === "logs" && (() => {
+          const filteredLogs = logLevelFilter === "all"
+            ? appLogs
+            : appLogs.filter((log) => log.level === logLevelFilter);
 
-                <Group gap="md">
-                  <SegmentedControl
-                    value={logViewMode}
-                    onChange={(val) => setLogViewMode(val || "all")}
-                    data={[
-                      { label: "Все логи", value: "all" },
-                      { label: "По процессам", value: "by_process" },
-                    ]}
-                    size="xs"
-                    radius="md"
-                    color="violet"
-                    styles={{
-                      root: {
-                        background: "rgba(255, 255, 255, 0.02)",
-                        border: "1px solid var(--glass-border)",
-                      }
-                    }}
-                  />
+          return (
+            <Stack gap="md" style={{ height: "calc(100vh - 92px)", display: "flex", flexDirection: "column" }}>
+              <Card radius="md" p="md" className="glass-panel" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <Group justify="space-between" mb="md" align="center">
+                  <Group gap="xs">
+                    <ThemeIcon size="md" variant="gradient" gradient={{ from: "red", to: "orange" }} radius="md">
+                      <IconTerminal2 size={18} />
+                    </ThemeIcon>
+                    <Title order={4} style={{ fontFamily: "Outfit, sans-serif" }}>
+                      СИСТЕМНЫЙ ЛОГ
+                    </Title>
+                    <Badge size="sm" variant="light" color="gray">
+                      {appLogs.length} / 300
+                    </Badge>
+                  </Group>
 
-                  <Tooltip label="Очистить все записи">
-                    <ActionIcon
-                      variant="light"
-                      color="red"
-                      size="lg"
+                  <Group gap="md">
+                    <SegmentedControl
+                      value={logLevelFilter}
+                      onChange={(val) => setLogLevelFilter(val || "all")}
+                      data={[
+                        { label: "Все уровни", value: "all" },
+                        { label: "Ошибки", value: "error" },
+                        { label: "Предупреждения", value: "warn" },
+                        { label: "Инфо", value: "info" },
+                      ]}
+                      size="xs"
                       radius="md"
-                      onClick={handleClearLogs}
-                      disabled={appLogs.length === 0}
-                    >
-                      <IconClearAll size={18} />
-                    </ActionIcon>
-                  </Tooltip>
+                      color="violet"
+                      styles={{
+                        root: {
+                          background: "rgba(255, 255, 255, 0.02)",
+                          border: "1px solid var(--glass-border)",
+                        }
+                      }}
+                    />
+
+                    <SegmentedControl
+                      value={logViewMode}
+                      onChange={(val) => setLogViewMode(val || "all")}
+                      data={[
+                        { label: "Все логи", value: "all" },
+                        { label: "По процессам", value: "by_process" },
+                      ]}
+                      size="xs"
+                      radius="md"
+                      color="violet"
+                      styles={{
+                        root: {
+                          background: "rgba(255, 255, 255, 0.02)",
+                          border: "1px solid var(--glass-border)",
+                        }
+                      }}
+                    />
+
+                    <Tooltip label="Очистить все записи">
+                      <ActionIcon
+                        variant="light"
+                        color="red"
+                        size="lg"
+                        radius="md"
+                        onClick={handleClearLogs}
+                        disabled={appLogs.length === 0}
+                      >
+                        <IconClearAll size={18} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </Group>
                 </Group>
-              </Group>
 
-              <ScrollArea style={{ flex: 1, minHeight: 0 }}>
-                {logViewMode === "by_process" ? (() => {
-                  // Group logs by process
-                  const groups: Record<string, LogEntry[]> = {};
-                  appLogs.forEach((log) => {
-                    const proc = log.process_name || "Система / Глобальные";
-                    if (!groups[proc]) {
-                      groups[proc] = [];
+                <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+                  {logViewMode === "by_process" ? (() => {
+                    // Group logs by process
+                    const groups: Record<string, LogEntry[]> = {};
+                    filteredLogs.forEach((log) => {
+                      const proc = log.process_name || "Система / Глобальные";
+                      if (!groups[proc]) {
+                        groups[proc] = [];
+                      }
+                      groups[proc].push(log);
+                    });
+
+                    const processNames = Object.keys(groups).sort((a, b) => {
+                      if (a === "Система / Глобальные") return 1;
+                      if (b === "Система / Глобальные") return -1;
+                      return a.localeCompare(b);
+                    });
+
+                    if (filteredLogs.length === 0) {
+                      return (
+                        <Text color="dimmed" size="sm" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", padding: "40px 0" }}>
+                          Лог пуст. Ошибки приложения будут отображаться здесь в реальном времени.
+                        </Text>
+                      );
                     }
-                    groups[proc].push(log);
-                  });
 
-                  const processNames = Object.keys(groups).sort((a, b) => {
-                    if (a === "Система / Глобальные") return 1;
-                    if (b === "Система / Глобальные") return -1;
-                    return a.localeCompare(b);
-                  });
+                    const renderConsoleLogs = (logs: LogEntry[]) => {
+                      return (
+                        <div style={{
+                          background: "#050508",
+                          borderRadius: "6px",
+                          padding: "8px 12px",
+                          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+                          fontSize: "12px",
+                          lineHeight: "1.7",
+                          marginTop: "8px",
+                        }}>
+                          {logs.map((log, idx) => {
+                            const date = new Date(log.timestamp);
+                            const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+                            const dateStr = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}`;
 
-                  if (appLogs.length === 0) {
+                            const levelColors: Record<string, string> = {
+                              error: "#ff4757",
+                              warn: "#ffa502",
+                              info: "#70a1ff",
+                            };
+                            const levelLabels: Record<string, string> = {
+                              error: "ERROR",
+                              warn: " WARN",
+                              info: " INFO",
+                            };
+                            const sourceColors: Record<string, string> = {
+                              relay: "#00d2d3",
+                              windivert: "#a78bfa",
+                              engine: "#60a5fa",
+                              system: "#78909c",
+                            };
+                            const levelColor = levelColors[log.level] || "#aaa";
+                            const srcColor = sourceColors[log.source] || "#aaa";
+
+                            return (
+                              <div
+                                key={log.id || idx}
+                                style={{
+                                  borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
+                                  padding: "4px 0",
+                                  display: "flex",
+                                  gap: "8px",
+                                  alignItems: "flex-start",
+                                }}
+                              >
+                                <span style={{ color: "rgba(255, 255, 255, 0.3)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                                  {dateStr} {timeStr}
+                                </span>
+                                <span style={{
+                                  color: levelColor,
+                                  fontWeight: 700,
+                                  flexShrink: 0,
+                                  textShadow: `0 0 8px ${levelColor}33`,
+                                }}>
+                                  {levelLabels[log.level] || log.level.toUpperCase().padStart(5)}
+                                </span>
+                                <span style={{
+                                  color: srcColor,
+                                  fontWeight: 600,
+                                  flexShrink: 0,
+                                  minWidth: "70px",
+                                }}>
+                                  {log.source}
+                                </span>
+                                <span style={{
+                                  color: "rgba(255, 255, 255, 0.85)",
+                                  wordBreak: "break-all",
+                                }}>
+                                  {log.message}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    };
+
                     return (
-                      <Text color="dimmed" size="sm" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", padding: "40px 0" }}>
-                        Лог пуст. Ошибки приложения будут отображаться здесь в реальном времени.
-                      </Text>
+                      <Accordion
+                        variant="separated"
+                        defaultValue={processNames[0]}
+                        styles={{
+                          item: {
+                            background: "rgba(255, 255, 255, 0.01)",
+                            border: "1px solid var(--glass-border)",
+                            borderRadius: "8px",
+                            marginBottom: "10px",
+                            overflow: "hidden",
+                            transition: "all 0.2s ease",
+                            "&[data-active]": {
+                              background: "rgba(255, 255, 255, 0.03)",
+                              borderColor: "rgba(124, 58, 237, 0.3)",
+                              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+                            }
+                          },
+                          control: {
+                            padding: "12px 16px",
+                            "&:hover": {
+                              background: "rgba(255, 255, 255, 0.02)",
+                            }
+                          },
+                          content: {
+                            padding: "0 16px 16px 16px",
+                            background: "rgba(0, 0, 0, 0.15)",
+                          }
+                        }}
+                      >
+                        {processNames.map((procName) => {
+                          const procLogs = groups[procName];
+                          const errs = procLogs.filter((l) => l.level === "error").length;
+                          const warns = procLogs.filter((l) => l.level === "warn").length;
+
+                          return (
+                            <Accordion.Item key={procName} value={procName}>
+                              <Accordion.Control>
+                                <Group justify="space-between" wrap="nowrap" style={{ width: "100%", paddingRight: "16px" }}>
+                                  <Group gap="xs" wrap="nowrap">
+                                    <ThemeIcon size="sm" color="violet" variant="light">
+                                      <IconTerminal2 size={12} />
+                                    </ThemeIcon>
+                                    <Text fw={600} size="sm" style={{ color: "#ffffff" }}>
+                                      {procName}
+                                    </Text>
+                                  </Group>
+                                  <Group gap="xs" style={{ flexShrink: 0 }}>
+                                    {errs > 0 && (
+                                      <Badge color="red" variant="filled" size="xs">
+                                        {errs} {errs === 1 ? "ошибка" : errs < 5 ? "ошибки" : "ошибок"}
+                                      </Badge>
+                                    )}
+                                    {warns > 0 && (
+                                      <Badge color="orange" variant="filled" size="xs">
+                                        {warns} {warns === 1 ? "предупреждение" : warns < 5 ? "предупреждения" : "предупреждений"}
+                                      </Badge>
+                                    )}
+                                    <Badge color="gray" variant="light" size="xs">
+                                      Всего: {procLogs.length}
+                                    </Badge>
+                                  </Group>
+                                </Group>
+                              </Accordion.Control>
+                              <Accordion.Panel>
+                                {renderConsoleLogs(procLogs)}
+                              </Accordion.Panel>
+                            </Accordion.Item>
+                          );
+                        })}
+                      </Accordion>
                     );
-                  }
-
-                  const renderConsoleLogs = (logs: LogEntry[]) => {
-                    return (
-                      <div style={{
-                        background: "#050508",
-                        borderRadius: "6px",
-                        padding: "8px 12px",
-                        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                        fontSize: "12px",
-                        lineHeight: "1.7",
-                        marginTop: "8px",
-                      }}>
-                        {logs.map((log, idx) => {
+                  })() : (
+                    <div style={{
+                      background: "#0a0a0f",
+                      borderRadius: "8px",
+                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                      padding: "12px",
+                      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+                      fontSize: "12px",
+                      lineHeight: "1.8",
+                      minHeight: "300px",
+                    }}>
+                      {filteredLogs.length === 0 ? (
+                        <Text color="dimmed" size="sm" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", padding: "40px 0" }}>
+                          Лог пуст. Ошибки приложения будут отображаться здесь в реальном времени.
+                        </Text>
+                      ) : (
+                        filteredLogs.map((log, idx) => {
                           const date = new Date(log.timestamp);
                           const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
                           const dateStr = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -2301,6 +2709,13 @@ function App() {
                                 display: "flex",
                                 gap: "8px",
                                 alignItems: "flex-start",
+                                transition: "background 0.15s ease",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "transparent";
                               }}
                             >
                               <span style={{ color: "rgba(255, 255, 255, 0.3)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -2322,6 +2737,11 @@ function App() {
                               }}>
                                 {log.source}
                               </span>
+                              {log.process_name && (
+                                <Badge size="xs" color="violet" variant="outline" style={{ flexShrink: 0, textTransform: "none" }}>
+                                  {log.process_name}
+                                </Badge>
+                              )}
                               <span style={{
                                 color: "rgba(255, 255, 255, 0.85)",
                                 wordBreak: "break-all",
@@ -2330,181 +2750,15 @@ function App() {
                               </span>
                             </div>
                           );
-                        })}
-                      </div>
-                    );
-                  };
-
-                  return (
-                    <Accordion
-                      variant="separated"
-                      defaultValue={processNames[0]}
-                      styles={{
-                        item: {
-                          background: "rgba(255, 255, 255, 0.01)",
-                          border: "1px solid var(--glass-border)",
-                          borderRadius: "8px",
-                          marginBottom: "10px",
-                          overflow: "hidden",
-                          transition: "all 0.2s ease",
-                          "&[data-active]": {
-                            background: "rgba(255, 255, 255, 0.03)",
-                            borderColor: "rgba(124, 58, 237, 0.3)",
-                            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
-                          }
-                        },
-                        control: {
-                          padding: "12px 16px",
-                          "&:hover": {
-                            background: "rgba(255, 255, 255, 0.02)",
-                          }
-                        },
-                        content: {
-                          padding: "0 16px 16px 16px",
-                          background: "rgba(0, 0, 0, 0.15)",
-                        }
-                      }}
-                    >
-                      {processNames.map((procName) => {
-                        const procLogs = groups[procName];
-                        const errs = procLogs.filter((l) => l.level === "error").length;
-                        const warns = procLogs.filter((l) => l.level === "warn").length;
-
-                        return (
-                          <Accordion.Item key={procName} value={procName}>
-                            <Accordion.Control>
-                              <Group justify="space-between" wrap="nowrap" style={{ width: "100%", paddingRight: "16px" }}>
-                                <Group gap="xs" wrap="nowrap">
-                                  <ThemeIcon size="sm" color="violet" variant="light">
-                                    <IconTerminal2 size={12} />
-                                  </ThemeIcon>
-                                  <Text fw={600} size="sm" style={{ color: "#ffffff" }}>
-                                    {procName}
-                                  </Text>
-                                </Group>
-                                <Group gap="xs" style={{ flexShrink: 0 }}>
-                                  {errs > 0 && (
-                                    <Badge color="red" variant="filled" size="xs">
-                                      {errs} {errs === 1 ? "ошибка" : errs < 5 ? "ошибки" : "ошибок"}
-                                    </Badge>
-                                  )}
-                                  {warns > 0 && (
-                                    <Badge color="orange" variant="filled" size="xs">
-                                      {warns} {warns === 1 ? "предупреждение" : warns < 5 ? "предупреждения" : "предупреждений"}
-                                    </Badge>
-                                  )}
-                                  <Badge color="gray" variant="light" size="xs">
-                                    Всего: {procLogs.length}
-                                  </Badge>
-                                </Group>
-                              </Group>
-                            </Accordion.Control>
-                            <Accordion.Panel>
-                              {renderConsoleLogs(procLogs)}
-                            </Accordion.Panel>
-                          </Accordion.Item>
-                        );
-                      })}
-                    </Accordion>
-                  );
-                })() : (
-                  <div style={{
-                    background: "#0a0a0f",
-                    borderRadius: "8px",
-                    border: "1px solid rgba(255, 255, 255, 0.06)",
-                    padding: "12px",
-                    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                    fontSize: "12px",
-                    lineHeight: "1.8",
-                    minHeight: "300px",
-                  }}>
-                    {appLogs.length === 0 ? (
-                      <Text color="dimmed" size="sm" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", padding: "40px 0" }}>
-                        Лог пуст. Ошибки приложения будут отображаться здесь в реальном времени.
-                      </Text>
-                    ) : (
-                      appLogs.map((log, idx) => {
-                        const date = new Date(log.timestamp);
-                        const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
-                        const dateStr = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}`;
-
-                        const levelColors: Record<string, string> = {
-                          error: "#ff4757",
-                          warn: "#ffa502",
-                          info: "#70a1ff",
-                        };
-                        const levelLabels: Record<string, string> = {
-                          error: "ERROR",
-                          warn: " WARN",
-                          info: " INFO",
-                        };
-                        const sourceColors: Record<string, string> = {
-                          relay: "#00d2d3",
-                          windivert: "#a78bfa",
-                          engine: "#60a5fa",
-                          system: "#78909c",
-                        };
-                        const levelColor = levelColors[log.level] || "#aaa";
-                        const srcColor = sourceColors[log.source] || "#aaa";
-
-                        return (
-                          <div
-                            key={log.id || idx}
-                            style={{
-                              borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
-                              padding: "4px 0",
-                              display: "flex",
-                              gap: "8px",
-                              alignItems: "flex-start",
-                              transition: "background 0.15s ease",
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = "transparent";
-                            }}
-                          >
-                            <span style={{ color: "rgba(255, 255, 255, 0.3)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                              {dateStr} {timeStr}
-                            </span>
-                            <span style={{
-                              color: levelColor,
-                              fontWeight: 700,
-                              flexShrink: 0,
-                              textShadow: `0 0 8px ${levelColor}33`,
-                            }}>
-                              {levelLabels[log.level] || log.level.toUpperCase().padStart(5)}
-                            </span>
-                            <span style={{
-                              color: srcColor,
-                              fontWeight: 600,
-                              flexShrink: 0,
-                              minWidth: "70px",
-                            }}>
-                              {log.source}
-                            </span>
-                            {log.process_name && (
-                              <Badge size="xs" color="violet" variant="outline" style={{ flexShrink: 0, textTransform: "none" }}>
-                                {log.process_name}
-                              </Badge>
-                            )}
-                            <span style={{
-                              color: "rgba(255, 255, 255, 0.85)",
-                              wordBreak: "break-all",
-                            }}>
-                              {log.message}
-                            </span>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </ScrollArea>
-            </Card>
-          </Stack>
-        )}
+                        })
+                      )}
+                    </div>
+                  )}
+                </ScrollArea>
+              </Card>
+            </Stack>
+          );
+        })()}
 
         {/* TAB: Rules */}
         {activeTab === "rules" && (
@@ -3015,17 +3269,9 @@ function App() {
                                 {dateStr}
                               </Text>
                             </Group>
-                            <Text
-                              size="sm"
-                              style={{
-                                whiteSpace: "pre-wrap",
-                                fontFamily: "sans-serif",
-                                color: "rgba(255, 255, 255, 0.85)",
-                                lineHeight: "1.6",
-                              }}
-                            >
-                              {rel.body}
-                            </Text>
+                            <div style={{ marginTop: "8px" }}>
+                              {renderMarkdown(rel.body)}
+                            </div>
                             <Divider my="sm" color="rgba(255, 255, 255, 0.05)" />
                             <Group justify="flex-end">
                               <Button
