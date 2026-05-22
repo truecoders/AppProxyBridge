@@ -384,6 +384,11 @@ async fn clear_app_logs(db_path: State<'_, DbPath>) -> Result<String, String> {
     Ok("Logs cleared".to_string())
 }
 
+#[tauri::command]
+async fn restart_app(app_handle: AppHandle) {
+    app_handle.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Create global thread-safe state
@@ -392,6 +397,7 @@ pub fn run() {
     
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(engine_state) // Add to Tauri context
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -500,7 +506,8 @@ pub fn run() {
             get_known_processes,
             set_process_group,
             get_app_logs,
-            clear_app_logs
+            clear_app_logs,
+            restart_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

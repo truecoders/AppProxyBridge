@@ -29,3 +29,8 @@ scratch/
 # Tauri debug logs
 src-tauri/debug.log
 src-tauri/target/
+
+# Tauri updater keys
+tauri-updater-key
+tauri-updater-key.pub
+

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { check } from "@tauri-apps/plugin-updater";
 import {
   AppShell,
   Burger,
@@ -27,6 +29,7 @@ import {
   Checkbox,
   Tooltip,
   Modal,
+  Progress,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -295,6 +298,118 @@ function App() {
     setStatusType(type);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = window.setTimeout(() => setStatusMessage(null), 6000);
+  };
+
+  // Update states
+  const [appVersion, setAppVersion] = useState<string>("0.4.5");
+  const [updateInfo, setUpdateInfo] = useState<{
+    version: string;
+    body?: string;
+    updateObj: any;
+  } | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState<boolean>(false);
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState<boolean>(false);
+  const [updateProgress, setUpdateProgress] = useState<number>(0);
+  const [updateProgressText, setUpdateProgressText] = useState<string>("");
+
+  useEffect(() => {
+    const fetchVersion = async () => {
+      try {
+        const ver = await getVersion();
+        setAppVersion(ver);
+      } catch (e) {
+        console.error("Failed to get app version", e);
+      }
+    };
+    fetchVersion();
+  }, []);
+
+  useEffect(() => {
+    const autoCheckUpdate = async () => {
+      const hasChecked = sessionStorage.getItem("hasCheckedUpdates");
+      if (hasChecked) return;
+      sessionStorage.setItem("hasCheckedUpdates", "true");
+      
+      try {
+        const update = await check();
+        if (update?.available) {
+          setUpdateInfo({
+            version: update.version,
+            body: update.body || "Нет описания изменений.",
+            updateObj: update,
+          });
+        }
+      } catch (err) {
+        console.error("Auto update check failed", err);
+      }
+    };
+    
+    const timer = setTimeout(autoCheckUpdate, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleManualUpdateCheck = async (silentOnNoUpdate: boolean = false) => {
+    setIsCheckingUpdate(true);
+    try {
+      const update = await check();
+      if (update?.available) {
+        setUpdateInfo({
+          version: update.version,
+          body: update.body || "Нет описания изменений.",
+          updateObj: update,
+        });
+      } else {
+        if (!silentOnNoUpdate) {
+          showNotification("У вас установлена последняя версия приложения", "success");
+        }
+      }
+    } catch (err) {
+      console.error("Manual update check failed", err);
+      showNotification(`Ошибка при проверке обновлений: ${err}`, "error");
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const handleDownloadAndInstall = async () => {
+    if (!updateInfo?.updateObj) return;
+    setIsDownloadingUpdate(true);
+    setUpdateProgress(0);
+    setUpdateProgressText("Подготовка к скачиванию...");
+    
+    let downloaded = 0;
+    let contentLength = 0;
+
+    try {
+      await updateInfo.updateObj.downloadAndInstall((event: any) => {
+        switch (event.event) {
+          case "Started":
+            contentLength = event.data.contentLength || 0;
+            setUpdateProgressText("Скачивание обновления началось...");
+            break;
+          case "Progress":
+            downloaded += event.data.chunkLength;
+            if (contentLength > 0) {
+              const pct = Math.round((downloaded / contentLength) * 100);
+              setUpdateProgress(pct);
+              setUpdateProgressText(`Скачивание... ${pct}% (${formatBytes(downloaded)} из ${formatBytes(contentLength)})`);
+            } else {
+              setUpdateProgressText(`Скачивание... (${formatBytes(downloaded)} загружено)`);
+            }
+            break;
+          case "Finished":
+            setUpdateProgress(100);
+            setUpdateProgressText("Установка обновления... Приложение сейчас перезагрузится.");
+            break;
+        }
+      });
+      
+      await invoke("restart_app");
+    } catch (err) {
+      console.error("Update download & install failed", err);
+      showNotification(`Ошибка обновления: ${err}`, "error");
+      setIsDownloadingUpdate(false);
+    }
   };
 
   // Sync running status and load saved session on mount
@@ -1553,6 +1668,109 @@ function App() {
         )}
 
         <Modal
+          opened={updateInfo !== null}
+          onClose={() => {
+            if (!isDownloadingUpdate) {
+              setUpdateInfo(null);
+            }
+          }}
+          title={
+            <Group gap="xs">
+              <ThemeIcon size="md" variant="gradient" gradient={{ from: "violet", to: "cyan" }} radius="md">
+                <IconSparkles size={18} />
+              </ThemeIcon>
+              <Text fw={700} size="lg">
+                Доступно обновление v{updateInfo?.version}
+              </Text>
+            </Group>
+          }
+          size="lg"
+          radius="md"
+          centered
+          closeOnEscape={!isDownloadingUpdate}
+          closeOnClickOutside={!isDownloadingUpdate}
+          withCloseButton={!isDownloadingUpdate}
+          styles={{
+            content: {
+              background: "rgba(20, 20, 25, 0.95)",
+              backdropFilter: "blur(20px)",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              color: "#fff"
+            },
+            header: {
+              background: "rgba(20, 20, 25, 0.95)",
+              color: "#fff"
+            }
+          }}
+        >
+          <Stack gap="md">
+            {!isDownloadingUpdate ? (
+              <>
+                <Text size="sm" color="dimmed">
+                  Новая версия <b>{updateInfo?.version}</b> готова к установке. Ниже приведено описание изменений:
+                </Text>
+                
+                <Paper
+                  p="md"
+                  radius="md"
+                  style={{
+                    background: "rgba(255, 255, 255, 0.02)",
+                    border: "1px solid var(--glass-border)",
+                    maxHeight: "250px",
+                    overflowY: "auto",
+                    whiteSpace: "pre-wrap",
+                    fontSize: "13px",
+                    lineHeight: "1.6",
+                    fontFamily: "Inter, sans-serif",
+                    color: "rgba(255, 255, 255, 0.9)"
+                  }}
+                >
+                  {updateInfo?.body || "Описания изменений нет."}
+                </Paper>
+
+                <Group justify="flex-end" mt="md">
+                  <Button
+                    variant="subtle"
+                    color="gray"
+                    onClick={() => setUpdateInfo(null)}
+                    radius="md"
+                  >
+                    Позже
+                  </Button>
+                  <Button
+                    variant="gradient"
+                    gradient={{ from: "violet", to: "cyan" }}
+                    onClick={handleDownloadAndInstall}
+                    radius="md"
+                  >
+                    Скачать и установить
+                  </Button>
+                </Group>
+              </>
+            ) : (
+              <Stack align="center" py="xl" gap="md">
+                <Text fw={600} size="md">
+                  {updateProgressText}
+                </Text>
+                <div style={{ width: "100%" }}>
+                  <Progress
+                    value={updateProgress}
+                    size="xl"
+                    radius="xl"
+                    striped
+                    animated
+                    color="violet"
+                  />
+                </div>
+                <Text size="xs" color="dimmed">
+                  Пожалуйста, не закрывайте приложение до завершения обновления.
+                </Text>
+              </Stack>
+            )}
+          </Stack>
+        </Modal>
+
+        <Modal
           opened={selectedProcessName !== null}
           onClose={() => setSelectedProcessName(null)}
           title={
@@ -2179,6 +2397,34 @@ function App() {
                   color="violet"
                 />
               </SimpleGrid>
+            </Card>
+
+            {/* System Update Card */}
+            <Card radius="md" p="md" className="glass-panel">
+              <Title order={4} mb="md" style={{ fontFamily: "Outfit, sans-serif" }}>
+                ОБНОВЛЕНИЕ СИСТЕМЫ
+              </Title>
+              <Divider mb="md" color="var(--glass-border)" />
+              <Group justify="space-between" align="center">
+                <div>
+                  <Text size="sm" color="dimmed">
+                    Текущая версия приложения: <b>v{appVersion}</b>
+                  </Text>
+                  <Text size="xs" color="dimmed" mt="xs">
+                    При выходе нового релиза на GitHub вы сможете обновить приложение в один клик.
+                  </Text>
+                </div>
+                <Button
+                  onClick={() => handleManualUpdateCheck(false)}
+                  loading={isCheckingUpdate}
+                  radius="md"
+                  color="violet"
+                  leftSection={<IconRefresh size={16} />}
+                  className="interactive-element"
+                >
+                  Проверить обновления
+                </Button>
+              </Group>
             </Card>
 
             <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">

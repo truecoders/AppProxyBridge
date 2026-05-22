@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AppProxyBridge",
-  "version": "0.4.0",
+  "version": "0.4.5",
   "identifier": "com.appproxybridge.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -24,6 +24,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -31,5 +32,15 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/truecoders/AppProxyBridge/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1NkQ3QkZDNTc5NEZBRkMKUldUOCtwUlgvSHR0NVJnZnF6VWlIdjlNQ2NFMWw2bWU5N2ZvNmlCc1RuT3NIRUVVRnNNMTRpNU4K",
+      "dialog": false
+    }
   }
 }
