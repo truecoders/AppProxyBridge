@@ -203,7 +203,7 @@ pub fn set_autostart(enabled: bool) -> Result<(), rusqlite::Error> {
     <RunOnlyIfIdle>false</RunOnlyIfIdle>
     <WakeToRun>false</WakeToRun>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
+    <Priority>1</Priority>
   </Settings>
   <Actions Context="Author">
     <Exec>

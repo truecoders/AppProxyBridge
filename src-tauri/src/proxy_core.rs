@@ -591,14 +591,7 @@ fn process_diverted_packet_sync(
     {
         let rules = state.rules.blocking_lock();
         for rule in rules.iter() {
-            let is_match = if rule.process_name.starts_with('*') {
-                let suffix = &rule.process_name[1..];
-                process_name.to_lowercase().ends_with(&suffix.to_lowercase())
-            } else {
-                rule.process_name.to_lowercase() == process_name.to_lowercase()
-            };
-            
-            if is_match {
+            if match_wildcard(&rule.process_name, &process_name) {
                 matching_action = rule.action.clone();
                 matched_proxy_id = rule.proxy_id.clone();
                 break;
@@ -934,4 +927,38 @@ pub fn get_active_system_connections(state: &EngineState) -> Vec<ConnectionInfo>
     connections.sort_by(|a, b| a.process_name.cmp(&b.process_name));
     connections.truncate(1000);
     connections
+}
+
+/// Helper to match string with wildcard pattern (supports '*' and '?')
+pub fn match_wildcard(pattern: &str, text: &str) -> bool {
+    let pattern_chars: Vec<char> = pattern.to_lowercase().chars().collect();
+    let text_chars: Vec<char> = text.to_lowercase().chars().collect();
+    
+    let mut p_idx = 0;
+    let mut t_idx = 0;
+    let mut star_idx = None;
+    let mut match_idx = 0;
+    
+    while t_idx < text_chars.len() {
+        if p_idx < pattern_chars.len() && (pattern_chars[p_idx] == '?' || pattern_chars[p_idx] == text_chars[t_idx]) {
+            p_idx += 1;
+            t_idx += 1;
+        } else if p_idx < pattern_chars.len() && pattern_chars[p_idx] == '*' {
+            star_idx = Some(p_idx);
+            match_idx = t_idx;
+            p_idx += 1;
+        } else if let Some(s_idx) = star_idx {
+            p_idx = s_idx + 1;
+            match_idx += 1;
+            t_idx = match_idx;
+        } else {
+            return false;
+        }
+    }
+    
+    while p_idx < pattern_chars.len() && pattern_chars[p_idx] == '*' {
+        p_idx += 1;
+    }
+    
+    p_idx == pattern_chars.len()
 }

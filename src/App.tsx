@@ -603,7 +603,7 @@ function App() {
   };
 
   // Update states
-  const [appVersion, setAppVersion] = useState<string>("0.4.5");
+  const [appVersion, setAppVersion] = useState<string>("0.5.6");
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     body?: string;
@@ -2791,10 +2791,38 @@ function App() {
               <Title order={4} mb="md" style={{ fontFamily: "Outfit, sans-serif" }}>
                 ДОБАВИТЬ ПРАВИЛО ФИЛЬТРАЦИИ
               </Title>
+
+              <Paper
+                p="sm"
+                radius="md"
+                mb="md"
+                style={{
+                  background: "rgba(255, 255, 255, 0.01)",
+                  border: "1px solid var(--glass-border)",
+                }}
+              >
+                <Text size="xs" fw={700} color="violet" mb="4px" style={{ letterSpacing: "0.5px" }}>
+                  💡 ПАМЯТКА ПО ИСПОЛЬЗОВАНИЮ МАСОК И ИМЕН ПРОЦЕССОВ
+                </Text>
+                <Text size="xs" color="dimmed" style={{ lineHeight: "1.6" }}>
+                  Вы можете указывать правила как для конкретных процессов, так и по маске с подстановочными знаками:
+                  <br />
+                  • <b>Точное совпадение:</b> <code>telegram.exe</code> — применит правило только к процессу Telegram.
+                  <br />
+                  • <b>Маска со звездочкой:</b> <code>*chrome*</code> — совпадет с любым процессом, содержащим "chrome" в названии (например, <code>chrome.exe</code>, <code>chrome_proxy.exe</code>).
+                  <br />
+                  • <b>Маска начала имени:</b> <code>PID_*</code> — совпадет со всеми процессами, чье имя начинается с "PID_" (полезно для временных процессов, чьи имена система не успела определить).
+                  <br />
+                  • <b>Маска конца имени:</b> <code>*.exe</code> — совпадет со всеми процессами, заканчивающимися на ".exe".
+                  <br />
+                  • Знак вопроса <code>?</code> заменяет ровно один любой символ (например, <code>test?.exe</code> совпадет с <code>test1.exe</code>, но не с <code>test12.exe</code>).
+                </Text>
+              </Paper>
+
               <Group grow align="flex-end" gap="md">
                 <TextInput
                   label="Имя исполняемого файла"
-                  placeholder="Пример: chrome.exe или *telegram.exe"
+                  placeholder="Пример: chrome.exe, *chrome*, PID_*"
                   value={newProcessName}
                   onChange={(e) => setNewProcessName(e.target.value)}
                   radius="md"

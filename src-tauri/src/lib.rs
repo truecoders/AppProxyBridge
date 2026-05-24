@@ -278,8 +278,33 @@ async fn save_routing_settings(
 async fn get_known_processes(db_path: State<'_, DbPath>) -> Result<Vec<KnownProcess>, String> {
     let conn = database::init_db(db_path.0.clone())
         .map_err(|e| format!("DB Error: {:?}", e))?;
-    database::load_known_processes(&conn)
-        .map_err(|e| format!("DB Load Known Processes Error: {:?}", e))
+    let mut known = database::load_known_processes(&conn)
+        .map_err(|e| format!("DB Load Known Processes Error: {:?}", e))?;
+        
+    let rules = database::load_rules(&conn).unwrap_or_default();
+    
+    // Dynamically update group_action based on current rules (including wildcard rules)
+    for proc in &mut known {
+        let mut matched_action = "new";
+        let mut matched_proxy_id = None;
+        
+        for rule in &rules {
+            if proxy_core::match_wildcard(&rule.process_name, &proc.process_name) {
+                matched_action = match rule.action {
+                    proxy_core::RuleAction::Proxy => "proxy",
+                    proxy_core::RuleAction::Direct => "direct",
+                    proxy_core::RuleAction::Block => "block",
+                };
+                matched_proxy_id = rule.proxy_id.clone();
+                break;
+            }
+        }
+        
+        proc.group_action = matched_action.to_string();
+        proc.proxy_id = matched_proxy_id;
+    }
+    
+    Ok(known)
 }
 
 #[tauri::command]
@@ -389,8 +414,27 @@ async fn restart_app(app_handle: AppHandle) {
     app_handle.restart();
 }
 
+#[cfg(target_os = "windows")]
+fn set_high_priority() {
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS};
+    unsafe {
+        let handle = GetCurrentProcess();
+        if SetPriorityClass(handle, HIGH_PRIORITY_CLASS) == 0 {
+            eprintln!("Failed to set process priority class to High");
+        } else {
+            eprintln!("Process priority class set to High");
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_high_priority() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Set high process priority class to start early and prioritize processing packet streams
+    set_high_priority();
+
     // Create global thread-safe state
     let engine_state = Arc::new(EngineState::new());
     let engine_state_clone = engine_state.clone();
@@ -428,19 +472,46 @@ pub fn run() {
                             let _ = window.hide();
                         }
                     }
-                }
-                
-                // Restore proxies
-                if let Ok(proxies) = database::load_proxies(&conn) {
+
+                    // Restore proxies and rules into memory
+                    let proxies = database::load_proxies(&conn).unwrap_or_default();
+                    let rules = database::load_rules(&conn).unwrap_or_default();
                     if let Ok(mut cfg) = engine_state_clone.config.try_lock() {
-                        *cfg = proxies;
+                        *cfg = proxies.clone();
                     }
-                }
-                
-                // Restore rules
-                if let Ok(rules) = database::load_rules(&conn) {
                     if let Ok(mut rls) = engine_state_clone.rules.try_lock() {
-                        *rls = rules;
+                        *rls = rules.clone();
+                    }
+
+                    // If autostart is enabled and we have proxies, start the engine immediately (Rust-side)
+                    if autostart && !proxies.is_empty() {
+                        engine_state_clone.running.store(true, Ordering::Relaxed);
+                        let app_handle = app.handle().clone();
+                        
+                        match proxy_core::start_windivert_loop(engine_state_clone.clone(), app_handle.clone(), db_path.clone()) {
+                            Ok(_) => {
+                                // Start TCP/UDP Relay servers
+                                let state_tcp = engine_state_clone.clone();
+                                let app_tcp = app_handle.clone();
+                                let db_tcp = db_path.clone();
+                                tokio::spawn(async move {
+                                    relay::start_tcp_relay(state_tcp, app_tcp, db_tcp).await;
+                                });
+
+                                let state_udp = engine_state_clone.clone();
+                                let app_udp = app_handle.clone();
+                                let db_udp = db_path.clone();
+                                tokio::spawn(async move {
+                                    relay::start_udp_relay(state_udp, app_udp, db_udp).await;
+                                });
+                                
+                                let _ = database::insert_log(&conn, "info", "Core", "Движок автозапущен при старте приложения (Rust)", None);
+                            }
+                            Err(e) => {
+                                engine_state_clone.running.store(false, Ordering::Relaxed);
+                                let _ = database::insert_log(&conn, "error", "Core", &format!("Ошибка автозапуска движка в Rust: {}", e), None);
+                            }
+                        }
                     }
                 }
             }
