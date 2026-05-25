@@ -603,7 +603,7 @@ function App() {
   };
 
   // Update states
-  const [appVersion, setAppVersion] = useState<string>("0.5.6");
+  const [appVersion, setAppVersion] = useState<string>("0.5.7");
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     body?: string;

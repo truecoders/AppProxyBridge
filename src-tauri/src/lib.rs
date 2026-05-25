@@ -432,6 +432,13 @@ fn set_high_priority() {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Set current directory to executable directory to locate WinDivert.dll/WinDivert64.sys correctly (critical for autostart)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let _ = std::env::set_current_dir(exe_dir);
+        }
+    }
+
     // Set high process priority class to start early and prioritize processing packet streams
     set_high_priority();
 
@@ -483,35 +490,49 @@ pub fn run() {
                         *rls = rules.clone();
                     }
 
-                    // If autostart is enabled and we have proxies, start the engine immediately (Rust-side)
+                    // If autostart is enabled and we have proxies, start the engine immediately (Rust-side, deferred to avoid early setup panics)
                     if autostart && !proxies.is_empty() {
-                        engine_state_clone.running.store(true, Ordering::Relaxed);
+                        let engine_state_clone = engine_state_clone.clone();
                         let app_handle = app.handle().clone();
+                        let db_path_clone = db_path.clone();
                         
-                        match proxy_core::start_windivert_loop(engine_state_clone.clone(), app_handle.clone(), db_path.clone()) {
-                            Ok(_) => {
-                                // Start TCP/UDP Relay servers
-                                let state_tcp = engine_state_clone.clone();
-                                let app_tcp = app_handle.clone();
-                                let db_tcp = db_path.clone();
-                                tokio::spawn(async move {
-                                    relay::start_tcp_relay(state_tcp, app_tcp, db_tcp).await;
-                                });
+                        tauri::async_runtime::spawn(async move {
+                            // Defer startup slightly to ensure Tauri windows and event loop are fully ready
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            
+                            // Re-open DB connection for background logs
+                            let conn = match database::init_db(db_path_clone.clone()) {
+                                Ok(c) => c,
+                                Err(_) => return,
+                            };
+                            
+                            engine_state_clone.running.store(true, Ordering::Relaxed);
+                            
+                            match proxy_core::start_windivert_loop(engine_state_clone.clone(), app_handle.clone(), db_path_clone.clone()) {
+                                Ok(_) => {
+                                    // Start TCP/UDP Relay servers
+                                    let state_tcp = engine_state_clone.clone();
+                                    let app_tcp = app_handle.clone();
+                                    let db_tcp = db_path_clone.clone();
+                                    tokio::spawn(async move {
+                                        relay::start_tcp_relay(state_tcp, app_tcp, db_tcp).await;
+                                    });
 
-                                let state_udp = engine_state_clone.clone();
-                                let app_udp = app_handle.clone();
-                                let db_udp = db_path.clone();
-                                tokio::spawn(async move {
-                                    relay::start_udp_relay(state_udp, app_udp, db_udp).await;
-                                });
-                                
-                                let _ = database::insert_log(&conn, "info", "Core", "Движок автозапущен при старте приложения (Rust)", None);
+                                    let state_udp = engine_state_clone.clone();
+                                    let app_udp = app_handle.clone();
+                                    let db_udp = db_path_clone.clone();
+                                    tokio::spawn(async move {
+                                        relay::start_udp_relay(state_udp, app_udp, db_udp).await;
+                                    });
+                                    
+                                    let _ = database::insert_log(&conn, "info", "Core", "Движок автозапущен при старте приложения (Rust)", None);
+                                }
+                                Err(e) => {
+                                    engine_state_clone.running.store(false, Ordering::Relaxed);
+                                    let _ = database::insert_log(&conn, "error", "Core", &format!("Ошибка автозапуска движка в Rust: {}", e), None);
+                                }
                             }
-                            Err(e) => {
-                                engine_state_clone.running.store(false, Ordering::Relaxed);
-                                let _ = database::insert_log(&conn, "error", "Core", &format!("Ошибка автозапуска движка в Rust: {}", e), None);
-                            }
-                        }
+                        });
                     }
                 }
             }
