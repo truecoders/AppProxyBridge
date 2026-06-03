@@ -732,7 +732,7 @@ fn process_diverted_packet_sync(
 pub fn get_active_system_connections(state: &EngineState) -> Vec<ConnectionInfo> {
     let mut connections = Vec::new();
     
-    // 1. Fetch TCP Table
+    // 1. Fetch TCP Table (IPv4)
     unsafe {
         let mut size = 0;
         GetExtendedTcpTable(std::ptr::null_mut(), &mut size, FALSE, AF_INET as u32, TCP_TABLE_OWNER_PID_ALL, 0);
@@ -744,6 +744,9 @@ pub fn get_active_system_connections(state: &EngineState) -> Vec<ConnectionInfo>
             for entry in entries {
                 let pid = entry.dwOwningPid;
                 if pid == 0 || pid == 4 { continue; } // Skip idle / system
+                
+                // Only include established connections (MIB_TCP_STATE_ESTAB = 5)
+                if entry.dwState != 5 { continue; }
                 
                 let local_port = u16::from_be((entry.dwLocalPort & 0xFFFF) as u16);
                 let remote_port = u16::from_be((entry.dwRemotePort & 0xFFFF) as u16);
@@ -793,6 +796,9 @@ pub fn get_active_system_connections(state: &EngineState) -> Vec<ConnectionInfo>
                     let pid = entry.dwOwningPid;
                     if pid == 0 || pid == 4 { continue; }
                     
+                    // Only include established connections (MIB_TCP_STATE_ESTAB = 5)
+                    if entry.dwState != 5 { continue; }
+                    
                     let local_port = (entry.dwLocalPort & 0xFFFF) as u16;
                     let local_port = u16::from_be(local_port);
                     let remote_port = (entry.dwRemotePort & 0xFFFF) as u16;
@@ -827,85 +833,6 @@ pub fn get_active_system_connections(state: &EngineState) -> Vec<ConnectionInfo>
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_millis() as u64,
-                        status: "Active".to_string(),
-                    });
-                }
-            }
-        }
-    }
-    // 3. Fetch UDP IPv4 Table
-    unsafe {
-        let mut size = 0;
-        GetExtendedUdpTable(std::ptr::null_mut(), &mut size, FALSE, AF_INET as u32, UDP_TABLE_OWNER_PID, 0);
-        if size > 0 {
-            let mut buffer = vec![0u8; size as usize];
-            if GetExtendedUdpTable(buffer.as_mut_ptr() as *mut _, &mut size, FALSE, AF_INET as u32, UDP_TABLE_OWNER_PID, 0) == 0 {
-                let table_ptr = buffer.as_ptr() as *const MibUdpTableOwnerPid;
-                let num_entries = (*table_ptr).dwNumEntries as usize;
-                let entries = std::slice::from_raw_parts((*table_ptr).table.as_ptr(), num_entries);
-                for entry in entries {
-                    let pid = entry.dwOwningPid;
-                    if pid == 0 || pid == 4 { continue; }
-                    
-                    let local_port = u16::from_be((entry.dwLocalPort & 0xFFFF) as u16);
-                    let local_ip = std::net::Ipv4Addr::from(entry.dwLocalAddr.to_be());
-                    
-                    if local_ip.is_loopback() { continue; }
-                    
-                    let process_name = get_process_name_for_pid(pid);
-                    if process_name.starts_with("PID_") { continue; }
-                    
-                    connections.push(ConnectionInfo {
-                        id: format!("{}:{}-UDP:{}", process_name, local_port, local_ip),
-                        pid,
-                        process_name,
-                        protocol: "UDP".to_string(),
-                        source_addr: format!("{}:{}", local_ip, local_port),
-                        original_dest: "UDP Endpoint".to_string(),
-                        action: "Direct".to_string(),
-                        bytes_sent: 0,
-                        bytes_received: 0,
-                        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
-                        status: "Active".to_string(),
-                    });
-                }
-            }
-        }
-    }
-
-    // 4. Fetch UDP IPv6 Table
-    unsafe {
-        let mut size = 0;
-        GetExtendedUdpTable(std::ptr::null_mut(), &mut size, FALSE, AF_INET6 as u32, UDP_TABLE_OWNER_PID, 0);
-        if size > 0 {
-            let mut buffer = vec![0u8; size as usize];
-            if GetExtendedUdpTable(buffer.as_mut_ptr() as *mut _, &mut size, FALSE, AF_INET6 as u32, UDP_TABLE_OWNER_PID, 0) == 0 {
-                let table_ptr = buffer.as_ptr() as *const MibUdp6TableOwnerPid;
-                let num_entries = (*table_ptr).dwNumEntries as usize;
-                let entries = std::slice::from_raw_parts((*table_ptr).table.as_ptr(), num_entries);
-                for entry in entries {
-                    let pid = entry.dwOwningPid;
-                    if pid == 0 || pid == 4 { continue; }
-                    
-                    let local_port = u16::from_be((entry.dwLocalPort & 0xFFFF) as u16);
-                    let local_ip = std::net::Ipv6Addr::from(entry.ucLocalAddr);
-                    
-                    if local_ip.is_loopback() { continue; }
-                    
-                    let process_name = get_process_name_for_pid(pid);
-                    if process_name.starts_with("PID_") { continue; }
-                    
-                    connections.push(ConnectionInfo {
-                        id: format!("{}:{}-UDP6:[{}]", process_name, local_port, local_ip),
-                        pid,
-                        process_name,
-                        protocol: "UDP".to_string(),
-                        source_addr: format!("[{}]:{}", local_ip, local_port),
-                        original_dest: "UDP Endpoint".to_string(),
-                        action: "Direct".to_string(),
-                        bytes_sent: 0,
-                        bytes_received: 0,
-                        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
                         status: "Active".to_string(),
                     });
                 }

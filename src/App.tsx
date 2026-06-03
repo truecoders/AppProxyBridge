@@ -603,7 +603,7 @@ function App() {
   };
 
   // Update states
-  const [appVersion, setAppVersion] = useState<string>("0.5.7");
+  const [appVersion, setAppVersion] = useState<string>("0.6.0");
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     body?: string;
@@ -1466,8 +1466,9 @@ function App() {
       <AppShell.Header
         className="glass-panel"
         style={{
+          border: "none",
           borderBottom: "1px solid var(--glass-border)",
-          background: "rgba(22, 17, 34, 0.6)",
+          background: "rgba(11, 8, 19, 0.65)",
           zIndex: 100,
         }}
       >
@@ -1475,10 +1476,10 @@ function App() {
           <Group>
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
             <img src="/icon.png" alt="AppProxyBridge Logo" style={{ width: 32, height: 32, objectFit: "contain" }} />
-            <Title order={3} className="glow-purple" style={{ fontFamily: "Outfit, sans-serif", letterSpacing: "1px" }}>
+            <Title order={3} className="glow-cyan" style={{ fontFamily: "Outfit, sans-serif", letterSpacing: "1px" }}>
               AppProxyBridge
             </Title>
-            <Badge color={isRunning ? "teal" : "red"} variant="light" size="lg" radius="sm">
+            <Badge color={isRunning ? "emerald" : "red"} variant="light" size="lg" radius="sm">
               {isRunning ? "АКТИВЕН" : "ВЫКЛЮЧЕН"}
             </Badge>
           </Group>
@@ -1490,10 +1491,10 @@ function App() {
               size="lg"
               onLabel="ON"
               offLabel="OFF"
-              color="violet"
+              color="cyan"
               thumbIcon={
                 isRunning ? (
-                  <IconCheck size="0.8rem" color="var(--mantine-color-teal-6)" stroke={3} />
+                  <IconCheck size="0.8rem" color="var(--mantine-color-emerald-5)" stroke={3} />
                 ) : (
                   <IconPower size="0.8rem" color="var(--mantine-color-red-6)" stroke={3} />
                 )
@@ -1508,8 +1509,9 @@ function App() {
         p="md"
         className="glass-panel"
         style={{
+          border: "none",
           borderRight: "1px solid var(--glass-border)",
-          background: "rgba(13, 10, 21, 0.8)",
+          background: "rgba(11, 8, 19, 0.8)",
           overflowY: "auto",
         }}
       >
@@ -1520,7 +1522,7 @@ function App() {
             active={activeTab === "dashboard"}
             onClick={() => setActiveTab("dashboard")}
             variant="filled"
-            color="violet"
+            color="cyan"
             className="interactive-element"
             style={{ borderRadius: "8px" }}
           />
@@ -1530,7 +1532,7 @@ function App() {
             active={activeTab === "rules"}
             onClick={() => setActiveTab("rules")}
             variant="filled"
-            color="violet"
+            color="cyan"
             className="interactive-element"
             style={{ borderRadius: "8px" }}
           />
@@ -1540,7 +1542,7 @@ function App() {
             active={activeTab === "proxy_settings"}
             onClick={() => setActiveTab("proxy_settings")}
             variant="filled"
-            color="violet"
+            color="cyan"
             className="interactive-element"
             style={{ borderRadius: "8px" }}
           />
@@ -1550,7 +1552,7 @@ function App() {
             active={activeTab === "settings"}
             onClick={() => setActiveTab("settings")}
             variant="filled"
-            color="violet"
+            color="cyan"
             className="interactive-element"
             style={{ borderRadius: "8px" }}
           />
@@ -1560,12 +1562,12 @@ function App() {
             active={activeTab === "logs"}
             onClick={() => setActiveTab("logs")}
             variant="filled"
-            color="violet"
+            color="cyan"
             className="interactive-element"
             style={{ borderRadius: "8px" }}
             rightSection={
               appLogs.length > 0 ? (
-                <Badge size="xs" color="red" variant="filled" circle>
+                <Badge size="xs" color="pink" variant="filled" circle>
                   {appLogs.length > 99 ? "99+" : appLogs.length}
                 </Badge>
               ) : null
@@ -1576,13 +1578,13 @@ function App() {
 
           <Stack gap="xs" style={{ flexGrow: 1 }}>
             {/* Stat: Active Connections */}
-            <Paper p="xs" radius="md" style={{ background: "rgba(255, 255, 255, 0.02)", border: "1px solid var(--glass-border)" }}>
+            <Paper p="xs" radius="md" style={{ background: "rgba(255, 255, 255, 0.015)", border: "1px solid var(--glass-border)" }}>
               <Group justify="space-between" wrap="nowrap">
                 <Stack gap={0}>
                   <Text size="10px" color="dimmed" fw={700} style={{ letterSpacing: "0.5px" }}>
                     АКТИВНЫЕ СОЕД.
                   </Text>
-                  <Text fw={700} size="md" mt="4px">
+                  <Text fw={700} size="md" mt="4px" className="glow-violet">
                     {activeConnectionsCount}
                   </Text>
                 </Stack>
@@ -1593,13 +1595,13 @@ function App() {
             </Paper>
 
             {/* Stat: Sent */}
-            <Paper p="xs" radius="md" style={{ background: "rgba(255, 255, 255, 0.02)", border: "1px solid var(--glass-border)" }}>
+            <Paper p="xs" radius="md" style={{ background: "rgba(255, 255, 255, 0.015)", border: "1px solid var(--glass-border)" }}>
               <Group justify="space-between" wrap="nowrap">
                 <Stack gap={0}>
                   <Text size="10px" color="dimmed" fw={700} style={{ letterSpacing: "0.5px" }}>
                     ОТПРАВЛЕНО
                   </Text>
-                  <Text fw={700} size="md" mt="4px" style={{ color: "#00f2fe" }}>
+                  <Text fw={700} size="md" mt="4px" className="glow-cyan">
                     {formatBytes(totalSent)}
                   </Text>
                 </Stack>
@@ -1610,30 +1612,30 @@ function App() {
             </Paper>
 
             {/* Stat: Received */}
-            <Paper p="xs" radius="md" style={{ background: "rgba(255, 255, 255, 0.02)", border: "1px solid var(--glass-border)" }}>
+            <Paper p="xs" radius="md" style={{ background: "rgba(255, 255, 255, 0.015)", border: "1px solid var(--glass-border)" }}>
               <Group justify="space-between" wrap="nowrap">
                 <Stack gap={0}>
                   <Text size="10px" color="dimmed" fw={700} style={{ letterSpacing: "0.5px" }}>
                     ПОЛУЧЕНО
                   </Text>
-                  <Text fw={700} size="md" mt="4px" style={{ color: "#39d353" }}>
+                  <Text fw={700} size="md" mt="4px" className="glow-emerald">
                     {formatBytes(totalReceived)}
                   </Text>
                 </Stack>
-                <ThemeIcon color="teal" variant="light" radius="md" size="md">
+                <ThemeIcon color="emerald" variant="light" radius="md" size="md">
                   <IconArrowDownLeft size={14} />
                 </ThemeIcon>
               </Group>
             </Paper>
 
             {/* Stat: Blocked */}
-            <Paper p="xs" radius="md" style={{ background: "rgba(255, 255, 255, 0.02)", border: "1px solid var(--glass-border)" }}>
+            <Paper p="xs" radius="md" style={{ background: "rgba(255, 255, 255, 0.015)", border: "1px solid var(--glass-border)" }}>
               <Group justify="space-between" wrap="nowrap">
                 <Stack gap={0}>
                   <Text size="10px" color="dimmed" fw={700} style={{ letterSpacing: "0.5px" }}>
                     ЗАБЛОКИРОВАНО
                   </Text>
-                  <Text fw={700} size="md" mt="4px" style={{ color: "#ff4757" }}>
+                  <Text fw={700} size="md" mt="4px" className="glow-red">
                     {blockedCount}
                   </Text>
                 </Stack>
@@ -1656,7 +1658,7 @@ function App() {
                 handleSaveSettings(proxyDns, bypassLocal, val, minimizeToTray, startMinimized);
               }}
               size="xs"
-              color="violet"
+              color="cyan"
               styles={{
                 label: { color: "#ffffff", fontWeight: 500, fontSize: "11px", cursor: "pointer" }
               }}
@@ -1671,7 +1673,7 @@ function App() {
                 handleSaveSettings(proxyDns, bypassLocal, autostart, val, startMinimized);
               }}
               size="xs"
-              color="violet"
+              color="cyan"
               styles={{
                 label: { color: "#ffffff", fontWeight: 500, fontSize: "11px", cursor: "pointer" }
               }}
@@ -1686,7 +1688,7 @@ function App() {
                 handleSaveSettings(proxyDns, bypassLocal, autostart, minimizeToTray, val);
               }}
               size="xs"
-              color="violet"
+              color="cyan"
               styles={{
                 label: { color: "#ffffff", fontWeight: 500, fontSize: "11px", cursor: "pointer" }
               }}
@@ -1732,6 +1734,7 @@ function App() {
                   style={{ flexGrow: 1, minWidth: "220px" }}
                   radius="md"
                   size="sm"
+                  classNames={{ input: "glass-input" }}
                 />
                 
                 <Group gap="xs" wrap="nowrap">
@@ -1747,6 +1750,7 @@ function App() {
                     radius="md"
                     size="sm"
                     style={{ width: "190px" }}
+                    classNames={{ input: "glass-input" }}
                   />
 
                   <Select
@@ -1762,16 +1766,18 @@ function App() {
                     radius="md"
                     size="sm"
                     style={{ width: "190px" }}
+                    classNames={{ input: "glass-input" }}
                   />
 
                   <Tooltip label="Переупорядочить список (сортировка)">
                     <ActionIcon
                       variant="light"
-                      color="violet"
+                      color="cyan"
                       size="lg"
                       radius="md"
                       onClick={() => setRefreshNonce((n) => n + 1)}
                       style={{ height: "36px", width: "36px" }}
+                      className="interactive-element"
                     >
                       <IconRefresh size={18} />
                     </ActionIcon>
@@ -1811,9 +1817,9 @@ function App() {
 
                   const groupConfig = [
                     { key: "new", label: "НОВЫЕ", icon: <IconSparkles size={16} />, color: "violet", gradient: { from: "violet", to: "pink" } },
-                    { key: "proxy", label: "ПРОКСИРУЮТСЯ", icon: <IconRoute size={16} />, color: "teal", gradient: { from: "teal", to: "cyan" } },
+                    { key: "proxy", label: "ПРОКСИРУЮТСЯ", icon: <IconRoute size={16} />, color: "emerald", gradient: { from: "cyan", to: "emerald" } },
                     { key: "direct", label: "НАПРЯМУЮ", icon: <IconArrowUpRight size={16} />, color: "gray", gradient: { from: "gray", to: "dark" } },
-                    { key: "block", label: "ЗАБЛОКИРОВАНЫ", icon: <IconLock size={16} />, color: "red", gradient: { from: "red", to: "orange" } },
+                    { key: "block", label: "ЗАБЛОКИРОВАНЫ", icon: <IconLock size={16} />, color: "red", gradient: { from: "red", to: "pink" } },
                   ];
 
                   const toggleGroup = (key: string) => {
@@ -1826,31 +1832,18 @@ function App() {
                     const lastActivity = processTraffic[procName]?.last_activity || 0;
                     const isInactive = (Date.now() - lastActivity) > 5000;
 
-                    let bg = "rgba(255, 255, 255, 0.01)";
-                    let border = "1px solid var(--glass-border)";
-                    let hoverBg = "rgba(255, 255, 255, 0.03)";
-                    let boxShadow = "none";
+                    const rowClasses: Record<string, string> = {
+                      new: "process-row-new",
+                      proxy: "process-row-proxy",
+                      direct: "process-row-direct",
+                      block: "process-row-block",
+                    };
 
-                    if (group === "proxy") {
-                      bg = "rgba(12, 196, 178, 0.04)";
-                      border = "1px solid rgba(12, 196, 178, 0.15)";
-                      hoverBg = "rgba(12, 196, 178, 0.08)";
-                    } else if (group === "block") {
-                      bg = "rgba(239, 68, 68, 0.04)";
-                      border = "1px solid rgba(239, 68, 68, 0.15)";
-                      hoverBg = "rgba(239, 68, 68, 0.08)";
-                    }
-
-                    if (highlightedProcesses[procName]) {
-                      bg = "rgba(124, 58, 237, 0.2)";
-                      border = "1px solid rgba(124, 58, 237, 0.5)";
-                      hoverBg = "rgba(124, 58, 237, 0.25)";
-                      boxShadow = "0 0 10px rgba(124, 58, 237, 0.25)";
-                    }
+                    let isFlash = highlightedProcesses[procName] ? "row-flash" : "";
 
                     // Action buttons: show all actions EXCEPT the current group
                     const actions = [
-                      { key: "proxy", tooltip: "Проксировать", icon: <IconRoute size={14} />, color: "teal" },
+                      { key: "proxy", tooltip: "Проксировать", icon: <IconRoute size={14} />, color: "cyan" },
                       { key: "direct", tooltip: "Напрямую", icon: <IconArrowUpRight size={14} />, color: "gray" },
                       { key: "block", tooltip: "Заблокировать", icon: <IconLock size={14} />, color: "red" },
                     ].filter((a) => a.key !== group);
@@ -1860,25 +1853,16 @@ function App() {
                         key={procName}
                         p="xs"
                         radius="md"
+                        className={`process-row ${rowClasses[group]} ${isFlash}`}
                         style={{
                           cursor: "pointer",
-                          transition: "all 0.15s ease",
-                          background: bg,
-                          border,
                           opacity: isInactive ? 0.6 : 1,
                           filter: isInactive ? "grayscale(100%)" : "none",
-                          boxShadow,
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = hoverBg;
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = bg;
                         }}
                       >
                         <Group justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
                           <Group gap="xs" wrap="nowrap" onClick={() => setSelectedProcessName(procName)} style={{ cursor: "pointer", flex: 1, minWidth: 0 }}>
-                            <ThemeIcon size="sm" variant="gradient" gradient={{ from: "violet", to: "cyan" }} radius="sm">
+                            <ThemeIcon size="sm" variant="gradient" gradient={{ from: "cyan", to: "violet" }} radius="sm">
                               <IconActivity size={14} />
                             </ThemeIcon>
                             <Text fw={600} size="sm" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1887,16 +1871,16 @@ function App() {
                           </Group>
                           <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
                             {connsList.length > 0 && (
-                              <Badge variant="filled" color="dark" size="xs" style={{ minWidth: "50px", textAlign: "center" }}>
+                              <Badge variant="light" color="violet" size="xs" className="glass-chip" style={{ minWidth: "50px", textAlign: "center" }}>
                                 {connsList.length}
                               </Badge>
                             )}
                             {processTraffic[procName] && (processTraffic[procName].sent > 0 || processTraffic[procName].recv > 0) && (
                               <>
-                                <Badge size="xs" variant="light" color="cyan" leftSection="↑" style={{ minWidth: "75px" }}>
+                                <Badge size="xs" variant="light" color="cyan" leftSection="↑" className="glass-chip" style={{ minWidth: "75px" }}>
                                   {formatBytes(processTraffic[procName].sent)}
                                 </Badge>
-                                <Badge size="xs" variant="light" color="green" leftSection="↓" style={{ minWidth: "75px" }}>
+                                <Badge size="xs" variant="light" color="emerald" leftSection="↓" className="glass-chip" style={{ minWidth: "75px" }}>
                                   {formatBytes(processTraffic[procName].recv)}
                                 </Badge>
                               </>
@@ -1913,7 +1897,7 @@ function App() {
                                     e.stopPropagation();
                                     handleSetProcessGroup(procName, action.key);
                                   }}
-                                  style={{ transition: "all 0.15s ease" }}
+                                  className="interactive-element"
                                 >
                                   {action.icon}
                                 </ActionIcon>
@@ -1932,17 +1916,22 @@ function App() {
                         if (items.length === 0) return null;
                         const isCollapsed = collapsedGroups[gc.key] || false;
 
+                        const cardGroupClasses: Record<string, string> = {
+                          new: "card-group-new",
+                          proxy: "card-group-proxy",
+                          direct: "card-group-direct",
+                          block: "card-group-block",
+                        };
+
                         return (
                           <div key={gc.key}>
                             <Paper
                               p="xs"
                               radius="md"
                               onClick={() => toggleGroup(gc.key)}
+                              className={`interactive-element ${cardGroupClasses[gc.key]}`}
                               style={{
                                 cursor: "pointer",
-                                background: `rgba(${gc.color === "teal" ? "12, 196, 178" : gc.color === "red" ? "239, 68, 68" : gc.color === "violet" ? "124, 58, 237" : "120, 120, 130"}, 0.08)`,
-                                border: `1px solid rgba(${gc.color === "teal" ? "12, 196, 178" : gc.color === "red" ? "239, 68, 68" : gc.color === "violet" ? "124, 58, 237" : "120, 120, 130"}, 0.25)`,
-                                transition: "all 0.15s ease",
                                 marginBottom: isCollapsed ? 0 : "4px",
                               }}
                             >
@@ -2002,13 +1991,14 @@ function App() {
           withCloseButton={!isDownloadingUpdate}
           styles={{
             content: {
-              background: "rgba(20, 20, 25, 0.95)",
-              backdropFilter: "blur(20px)",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
+              background: "rgba(11, 8, 19, 0.9)",
+              backdropFilter: "blur(30px)",
+              border: "1px solid rgba(168, 85, 247, 0.2)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.6), var(--shadow-violet)",
               color: "#fff"
             },
             header: {
-              background: "rgba(20, 20, 25, 0.95)",
+              background: "transparent",
               color: "#fff"
             }
           }}
@@ -2051,6 +2041,7 @@ function App() {
                     gradient={{ from: "violet", to: "cyan" }}
                     onClick={handleDownloadAndInstall}
                     radius="md"
+                    className="candy-btn-primary"
                   >
                     Скачать и установить
                   </Button>
@@ -2068,7 +2059,8 @@ function App() {
                     radius="xl"
                     striped
                     animated
-                    color="violet"
+                    color="cyan"
+                    classNames={{ section: "gloss-progress" }}
                   />
                 </div>
                 <Text size="xs" color="dimmed">
@@ -2097,13 +2089,14 @@ function App() {
           centered
           styles={{
             content: {
-              background: "rgba(20, 20, 25, 0.95)",
-              backdropFilter: "blur(20px)",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
+              background: "rgba(11, 8, 19, 0.9)",
+              backdropFilter: "blur(30px)",
+              border: "1px solid rgba(168, 85, 247, 0.2)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.6), var(--shadow-violet)",
               color: "#fff"
             },
             header: {
-              background: "rgba(20, 20, 25, 0.95)",
+              background: "transparent",
               color: "#fff"
             }
           }}
@@ -2131,19 +2124,20 @@ function App() {
                     p="sm"
                     radius="md"
                     style={{
-                      background: "rgba(12, 196, 178, 0.04)",
-                      border: "1px solid rgba(12, 196, 178, 0.15)",
+                      background: "rgba(0, 240, 255, 0.02)",
+                      border: "1px solid rgba(0, 240, 255, 0.15)",
                       display: "flex",
                       alignItems: "center",
                       gap: "12px",
+                      boxShadow: "0 0 10px rgba(0, 240, 255, 0.05)"
                     }}
                   >
-                    <ThemeIcon color="teal" variant="light" size="lg" radius="md">
+                    <ThemeIcon color="cyan" variant="light" size="lg" radius="md">
                       <IconArrowUpRight size={20} />
                     </ThemeIcon>
                     <div>
                       <Text size="xs" color="dimmed" fw={500}>ОТПРАВЛЕНО</Text>
-                      <Text size="md" fw={700} style={{ color: "#0cc4b2", fontFamily: "Outfit, sans-serif" }}>
+                      <Text size="md" fw={700} className="glow-cyan" style={{ fontFamily: "Outfit, sans-serif" }}>
                         {formatBytes(totalSentBytes)}
                       </Text>
                     </div>
@@ -2154,19 +2148,20 @@ function App() {
                     p="sm"
                     radius="md"
                     style={{
-                      background: "rgba(124, 58, 237, 0.04)",
-                      border: "1px solid rgba(124, 58, 237, 0.15)",
+                      background: "rgba(0, 255, 133, 0.02)",
+                      border: "1px solid rgba(0, 255, 133, 0.15)",
                       display: "flex",
                       alignItems: "center",
                       gap: "12px",
+                      boxShadow: "0 0 10px rgba(0, 255, 133, 0.05)"
                     }}
                   >
-                    <ThemeIcon color="violet" variant="light" size="lg" radius="md">
+                    <ThemeIcon color="emerald" variant="light" size="lg" radius="md">
                       <IconArrowDownLeft size={20} />
                     </ThemeIcon>
                     <div>
                       <Text size="xs" color="dimmed" fw={500}>ПОЛУЧЕНО</Text>
-                      <Text size="md" fw={700} style={{ color: "#a78bfa", fontFamily: "Outfit, sans-serif" }}>
+                      <Text size="md" fw={700} className="glow-emerald" style={{ fontFamily: "Outfit, sans-serif" }}>
                         {formatBytes(totalRecvBytes)}
                       </Text>
                     </div>
@@ -2177,26 +2172,27 @@ function App() {
                     p="sm"
                     radius="md"
                     style={{
-                      background: "rgba(59, 130, 246, 0.04)",
-                      border: "1px solid rgba(59, 130, 246, 0.15)",
+                      background: "rgba(168, 85, 247, 0.02)",
+                      border: "1px solid rgba(168, 85, 247, 0.15)",
                       display: "flex",
                       alignItems: "center",
                       gap: "12px",
+                      boxShadow: "0 0 10px rgba(168, 85, 247, 0.05)"
                     }}
                   >
-                    <ThemeIcon color="blue" variant="light" size="lg" radius="md">
+                    <ThemeIcon color="violet" variant="light" size="lg" radius="md">
                       <IconActivity size={20} />
                     </ThemeIcon>
                     <div style={{ flex: 1 }}>
                       <Group justify="space-between" align="center" wrap="nowrap">
                         <div>
                           <Text size="xs" color="dimmed" fw={500}>АКТИВНОСТЬ</Text>
-                          <Text size="sm" fw={700} style={{ color: "#60a5fa", fontFamily: "Outfit, sans-serif" }}>
+                          <Text size="sm" fw={700} className="glow-violet" style={{ fontFamily: "Outfit, sans-serif" }}>
                             {activeConns} акт. / {totalConns} всего
                           </Text>
                         </div>
                         <Badge
-                          color={isProcessActive ? "teal" : "gray"}
+                          color={isProcessActive ? "emerald" : "gray"}
                           variant="dot"
                           size="sm"
                           style={{ textTransform: "none" }}
@@ -2213,7 +2209,7 @@ function App() {
                   p="md"
                   radius="md"
                   style={{
-                    background: "rgba(255, 255, 255, 0.02)",
+                    background: "rgba(255, 255, 255, 0.01)",
                     border: "1px solid var(--glass-border)",
                   }}
                 >
@@ -2232,7 +2228,7 @@ function App() {
                           color={
                             activeRule
                               ? activeRule.action === "Proxy"
-                                ? "teal"
+                                ? "cyan"
                                 : activeRule.action === "Block"
                                 ? "red"
                                 : "gray"
@@ -2262,6 +2258,7 @@ function App() {
                         value={activeRule ? activeRule.action : "Direct"}
                         onChange={(val) => handleQuickRuleAction(procName, val as any)}
                         style={{ width: "135px" }}
+                        classNames={{ input: "glass-input" }}
                       />
 
                       {(!activeRule || activeRule.action === "Proxy") && (
@@ -2277,6 +2274,7 @@ function App() {
                           onChange={(val) => handleQuickRuleProxy(procName, val || "")}
                           placeholder={proxies.length === 0 ? "Нет прокси" : "Выберите прокси"}
                           style={{ width: "165px" }}
+                          classNames={{ input: "glass-input" }}
                         />
                       )}
 
@@ -2287,16 +2285,19 @@ function App() {
                           variant="light"
                           onClick={() => handleQuickRuleDelete(procName)}
                           style={{ height: "30px" }}
+                          radius="md"
                         >
                           Сбросить
                         </Button>
                       ) : (
                         <Button
                           size="xs"
-                          color="violet"
+                          color="cyan"
                           variant="light"
                           onClick={() => handleQuickRuleCreate(procName)}
                           style={{ height: "30px" }}
+                          radius="md"
+                          className="candy-btn-primary"
                         >
                           Активировать
                         </Button>
@@ -2342,14 +2343,9 @@ function App() {
                         }).map((c) => (
                           <Table.Tr
                             key={c.id}
+                            className={highlightedConns[c.id] ? "row-flash" : ""}
                             style={{
                               transition: "all 0.15s ease",
-                              backgroundColor: highlightedConns[c.id]
-                                ? "rgba(124, 58, 237, 0.25)"
-                                : "transparent",
-                              boxShadow: highlightedConns[c.id]
-                                ? "inset 0 0 12px rgba(124, 58, 237, 0.3)"
-                                : "none",
                               opacity: c.status === "Closed" ? 0.55 : 1,
                             }}
                           >
@@ -2466,10 +2462,10 @@ function App() {
                       ]}
                       size="xs"
                       radius="md"
-                      color="violet"
+                      color="cyan"
                       styles={{
                         root: {
-                          background: "rgba(255, 255, 255, 0.02)",
+                          background: "rgba(0, 0, 0, 0.25)",
                           border: "1px solid var(--glass-border)",
                         }
                       }}
@@ -2484,10 +2480,10 @@ function App() {
                       ]}
                       size="xs"
                       radius="md"
-                      color="violet"
+                      color="cyan"
                       styles={{
                         root: {
-                          background: "rgba(255, 255, 255, 0.02)",
+                          background: "rgba(0, 0, 0, 0.25)",
                           border: "1px solid var(--glass-border)",
                         }
                       }}
@@ -2501,6 +2497,7 @@ function App() {
                         radius="md"
                         onClick={handleClearLogs}
                         disabled={appLogs.length === 0}
+                        className="interactive-element"
                       >
                         <IconClearAll size={18} />
                       </ActionIcon>
@@ -2536,15 +2533,17 @@ function App() {
 
                     const renderConsoleLogs = (logs: LogEntry[]) => {
                       return (
-                        <div style={{
-                          background: "#050508",
-                          borderRadius: "6px",
-                          padding: "8px 12px",
-                          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                          fontSize: "12px",
-                          lineHeight: "1.7",
-                          marginTop: "8px",
-                        }}>
+                        <div
+                          className="technical-mono"
+                          style={{
+                            background: "#050508",
+                            borderRadius: "6px",
+                            padding: "8px 12px",
+                            fontSize: "12px",
+                            lineHeight: "1.7",
+                            marginTop: "8px",
+                          }}
+                        >
                           {logs.map((log, idx) => {
                             const date = new Date(log.timestamp);
                             const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
@@ -2618,16 +2617,16 @@ function App() {
                         defaultValue={processNames[0]}
                         styles={{
                           item: {
-                            background: "rgba(255, 255, 255, 0.01)",
+                            background: "rgba(21, 18, 29, 0.35)",
                             border: "1px solid var(--glass-border)",
-                            borderRadius: "8px",
+                            borderRadius: "12px",
                             marginBottom: "10px",
                             overflow: "hidden",
                             transition: "all 0.2s ease",
                             "&[data-active]": {
-                              background: "rgba(255, 255, 255, 0.03)",
-                              borderColor: "rgba(124, 58, 237, 0.3)",
-                              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+                              background: "rgba(21, 18, 29, 0.55)",
+                              borderColor: "rgba(168, 85, 247, 0.35)",
+                              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.3), var(--shadow-violet)",
                             }
                           },
                           control: {
@@ -2826,6 +2825,7 @@ function App() {
                   value={newProcessName}
                   onChange={(e) => setNewProcessName(e.target.value)}
                   radius="md"
+                  classNames={{ input: "glass-input" }}
                 />
                 <Select
                   label="Действие"
@@ -2837,6 +2837,7 @@ function App() {
                   value={newAction}
                   onChange={(val) => setNewAction(val || "Proxy")}
                   radius="md"
+                  classNames={{ input: "glass-input" }}
                 />
                 
                 {newAction === "Proxy" && (
@@ -2850,15 +2851,15 @@ function App() {
                     value={selectedProxyId}
                     onChange={(val) => setSelectedProxyId(val || "")}
                     radius="md"
+                    classNames={{ input: "glass-input" }}
                   />
                 )}
                 
                 <Button
                   onClick={handleAddRule}
                   radius="md"
-                  color="violet"
                   leftSection={<IconPlus size={16} />}
-                  className="interactive-element"
+                  className="candy-btn-primary"
                 >
                   Добавить
                 </Button>
@@ -2885,13 +2886,13 @@ function App() {
                         radius="md"
                         className="interactive-element"
                         style={{
-                          background: "rgba(255, 255, 255, 0.02)",
+                          background: "rgba(255, 255, 255, 0.015)",
                           border: "1px solid var(--glass-border)",
                         }}
                       >
                         <Group justify="space-between">
                           <Group>
-                            <ThemeIcon color="violet" variant="light" size="md">
+                            <ThemeIcon color="cyan" variant="light" size="md">
                               <IconShield size={16} />
                             </ThemeIcon>
                             <Text fw={600}>{rule.process_name}</Text>
@@ -3008,6 +3009,7 @@ function App() {
                     onChange={(e) => handleParseString(e.target.value)}
                     radius="md"
                     size="xs"
+                    classNames={{ input: "glass-input" }}
                     rightSection={
                       <Tooltip label="Вставьте строку подключения прокси">
                         <IconCopy size={14} color="gray" />
@@ -3022,6 +3024,7 @@ function App() {
                     onChange={(e) => setNewProxyName(e.target.value)}
                     radius="md"
                     size="xs"
+                    classNames={{ input: "glass-input" }}
                   />
 
                   <Select
@@ -3034,6 +3037,7 @@ function App() {
                     onChange={(val) => setProxyType(val || "SOCKS5")}
                     radius="md"
                     size="xs"
+                    classNames={{ input: "glass-input" }}
                   />
 
                   <Group grow gap="xs">
@@ -3044,6 +3048,7 @@ function App() {
                       onChange={(e) => setProxyHost(e.target.value)}
                       radius="md"
                       size="xs"
+                      classNames={{ input: "glass-input" }}
                     />
                     <NumberInput
                       label="Порт"
@@ -3052,6 +3057,7 @@ function App() {
                       onChange={(val) => setProxyPort(Number(val) || 1080)}
                       radius="md"
                       size="xs"
+                      classNames={{ input: "glass-input" }}
                     />
                   </Group>
 
@@ -3063,6 +3069,7 @@ function App() {
                       onChange={(e) => setUsername(e.target.value)}
                       radius="md"
                       size="xs"
+                      classNames={{ input: "glass-input" }}
                     />
                     <TextInput
                       label="Пароль (опционально)"
@@ -3072,6 +3079,7 @@ function App() {
                       onChange={(e) => setPassword(e.target.value)}
                       radius="md"
                       size="xs"
+                      classNames={{ input: "glass-input" }}
                     />
                   </Group>
 
@@ -3080,17 +3088,16 @@ function App() {
                     checked={isPrimaryChecked}
                     onChange={(e) => setIsPrimaryChecked(e.currentTarget.checked)}
                     mt="xs"
-                    color="violet"
+                    color="cyan"
                     size="xs"
                   />
 
                   <Button
-                    color="violet"
                     onClick={handleAddProxy}
                     radius="md"
                     mt="xs"
                     size="sm"
-                    className="interactive-element"
+                    className="candy-btn-primary"
                     leftSection={<IconPlus size={16} />}
                   >
                     Добавить в список
@@ -3103,7 +3110,7 @@ function App() {
 
         {/* TAB: App Settings */}
         {activeTab === "settings" && (
-          <Tabs defaultValue="general" color="violet" variant="outline" styles={{
+          <Tabs defaultValue="general" color="cyan" variant="outline" styles={{
             root: {
               display: 'flex',
               flexDirection: 'column',
@@ -3122,7 +3129,7 @@ function App() {
               },
               '&[data-active]': {
                 color: '#ffffff',
-                borderColor: '#7c3aed',
+                borderColor: '#00f0ff',
               }
             },
             panel: {
@@ -3156,7 +3163,7 @@ function App() {
                         handleSaveSettings(val, bypassLocal, autostart, minimizeToTray, startMinimized);
                       }}
                       size="md"
-                      color="violet"
+                      color="cyan"
                     />
                     <Switch
                       label="Обходить локальные адреса (Intranet/Bypass Local)"
@@ -3167,7 +3174,7 @@ function App() {
                         handleSaveSettings(proxyDns, val, autostart, minimizeToTray, startMinimized);
                       }}
                       size="md"
-                      color="violet"
+                      color="cyan"
                     />
                   </SimpleGrid>
                 </Card>
@@ -3188,7 +3195,7 @@ function App() {
                         handleSaveSettings(proxyDns, bypassLocal, val, minimizeToTray, startMinimized);
                       }}
                       size="md"
-                      color="violet"
+                      color="cyan"
                     />
 
                     <Switch
@@ -3200,7 +3207,7 @@ function App() {
                         handleSaveSettings(proxyDns, bypassLocal, autostart, val, startMinimized);
                       }}
                       size="md"
-                      color="violet"
+                      color="cyan"
                     />
 
                     <Switch
@@ -3212,7 +3219,7 @@ function App() {
                         handleSaveSettings(proxyDns, bypassLocal, autostart, minimizeToTray, val);
                       }}
                       size="md"
-                      color="violet"
+                      color="cyan"
                     />
                   </SimpleGrid>
                 </Card>
@@ -3236,9 +3243,8 @@ function App() {
                       onClick={() => handleManualUpdateCheck(false)}
                       loading={isCheckingUpdate}
                       radius="md"
-                      color="violet"
                       leftSection={<IconRefresh size={16} />}
-                      className="interactive-element"
+                      className="candy-btn-primary"
                     >
                       Проверить обновления
                     </Button>

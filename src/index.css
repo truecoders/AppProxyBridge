@@ -1,27 +1,42 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
 
 :root {
-  --font-sans: 'Plus Jakarta Sans', 'Outfit', system-ui, -apple-system, sans-serif;
-  
-  /* Color Palette - Premium Dark Mode */
-  --bg-gradient: radial-gradient(circle at 50% 0%, #151124 0%, #0d0a15 60%, #06050a 100%);
-  --glass-bg: rgba(22, 17, 34, 0.45);
-  --glass-border: rgba(255, 255, 255, 0.05);
-  --glass-border-active: rgba(255, 255, 255, 0.15);
-  --accent-glow: 0 0 30px rgba(112, 79, 240, 0.15);
-  --neon-cyan: #00f2fe;
-  --neon-purple: #704ff0;
-  --neon-green: #39d353;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-headers: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Color Palette - Premium Candy Glass Dark Theme */
+  --bg-dark: #0b0813;
+  --bg-gradient: radial-gradient(circle at 50% 0%, #171129 0%, #0d0a16 50%, #050409 100%);
+  --glass-bg: rgba(21, 18, 29, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-border-hover: rgba(255, 255, 255, 0.15);
+
+  /* Neon Glow Accents */
+  --neon-cyan: #00f0ff;
+  --neon-emerald: #00ff85;
+  --neon-pink: #ff00e5;
+  --neon-violet: #a855f7;
   --neon-red: #ff4757;
+  --neon-gray: #78909c;
+
+  /* Accent Shadows */
+  --shadow-cyan: 0 0 15px rgba(0, 240, 255, 0.2);
+  --shadow-emerald: 0 0 15px rgba(0, 255, 133, 0.2);
+  --shadow-pink: 0 0 15px rgba(255, 0, 229, 0.2);
+  --shadow-violet: 0 0 15px rgba(168, 85, 247, 0.2);
+  --shadow-red: 0 0 15px rgba(255, 71, 87, 0.2);
+  --shadow-gray: 0 0 15px rgba(120, 120, 130, 0.1);
 }
 
 body {
   margin: 0;
   padding: 0;
   font-family: var(--font-sans);
-  background: var(--bg-gradient);
+  background: var(--bg-dark);
+  background-image: var(--bg-gradient);
   background-attachment: fixed;
-  color: #f1f1f6;
+  color: #e7dff0;
   min-height: 100vh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
@@ -31,17 +46,58 @@ body {
 /* Glassmorphism Panel Utility */
 .glass-panel {
   background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .glass-panel:hover {
-  border-color: var(--glass-border-active);
-  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), var(--accent-glow);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Card Categories Glowing Borders */
+.card-group-new {
+  border: 1px solid rgba(168, 85, 247, 0.25) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 15px rgba(168, 85, 247, 0.1) !important;
+  background: rgba(168, 85, 247, 0.015) !important;
+}
+.card-group-new:hover {
+  border-color: rgba(168, 85, 247, 0.45) !important;
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), var(--shadow-violet) !important;
+}
+
+.card-group-proxy {
+  border: 1px solid rgba(0, 240, 255, 0.25) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 15px rgba(0, 240, 255, 0.1) !important;
+  background: rgba(0, 240, 255, 0.015) !important;
+}
+.card-group-proxy:hover {
+  border-color: rgba(0, 240, 255, 0.45) !important;
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), var(--shadow-cyan) !important;
+}
+
+.card-group-direct {
+  border: 1px solid rgba(120, 120, 130, 0.2) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 15px rgba(120, 120, 130, 0.05) !important;
+  background: rgba(255, 255, 255, 0.005) !important;
+}
+.card-group-direct:hover {
+  border-color: rgba(120, 120, 130, 0.35) !important;
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), var(--shadow-gray) !important;
+}
+
+.card-group-block {
+  border: 1px solid rgba(255, 0, 229, 0.25) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 15px rgba(255, 0, 229, 0.1) !important;
+  background: rgba(255, 0, 229, 0.015) !important;
+}
+.card-group-block:hover {
+  border-color: rgba(255, 0, 229, 0.45) !important;
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), var(--shadow-pink) !important;
 }
 
 /* Custom Scrollbar */
@@ -55,43 +111,208 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(112, 79, 240, 0.3);
+  background: rgba(168, 85, 247, 0.25);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(112, 79, 240, 0.6);
+  background: rgba(168, 85, 247, 0.55);
 }
 
-/* Neon Glows */
+/* Neon Text Glows */
 .glow-cyan {
-  text-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+  color: var(--neon-cyan);
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
 }
 
-.glow-purple {
-  text-shadow: 0 0 10px rgba(112, 79, 240, 0.5);
+.glow-emerald {
+  color: var(--neon-emerald);
+  text-shadow: 0 0 8px rgba(0, 255, 133, 0.4);
 }
 
-/* Smooth Transitions & Hover Effects */
-.interactive-element {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+.glow-pink {
+  color: var(--neon-pink);
+  text-shadow: 0 0 8px rgba(255, 0, 229, 0.4);
 }
 
-.interactive-element:hover {
-  transform: translateY(-2px);
+.glow-violet {
+  color: var(--neon-violet);
+  text-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
 }
 
-.interactive-element:active {
-  transform: translateY(0);
+.glow-red {
+  color: var(--neon-red);
+  text-shadow: 0 0 8px rgba(255, 71, 87, 0.4);
 }
 
-/* Keyframe Animations */
-@keyframes pulseGlow {
-  0% { box-shadow: 0 0 15px rgba(112, 79, 240, 0.1); }
-  50% { box-shadow: 0 0 25px rgba(112, 79, 240, 0.3); }
-  100% { box-shadow: 0 0 15px rgba(112, 79, 240, 0.1); }
+/* Row Styling with Hover Stripes */
+.process-row {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  border: 1px solid transparent !important;
+  background: rgba(255, 255, 255, 0.01) !important;
 }
 
-.pulse-card {
-  animation: pulseGlow 3s infinite ease-in-out;
+.process-row:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+  transform: translateX(4px);
 }
+
+.process-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  transform: scaleY(0);
+  transition: transform 0.2s ease;
+  z-index: 10;
+}
+
+.process-row:hover::before {
+  transform: scaleY(1);
+}
+
+.process-row-new {
+  border: 1px solid rgba(168, 85, 247, 0.06) !important;
+}
+.process-row-new:hover {
+  border-color: rgba(168, 85, 247, 0.2) !important;
+}
+.process-row-new::before {
+  background: var(--neon-violet);
+  box-shadow: 0 0 10px var(--neon-violet);
+}
+
+.process-row-proxy {
+  border: 1px solid rgba(0, 240, 255, 0.06) !important;
+}
+.process-row-proxy:hover {
+  border-color: rgba(0, 240, 255, 0.2) !important;
+}
+.process-row-proxy::before {
+  background: var(--neon-cyan);
+  box-shadow: 0 0 10px var(--neon-cyan);
+}
+
+.process-row-direct {
+  border: 1px solid rgba(120, 120, 130, 0.06) !important;
+}
+.process-row-direct:hover {
+  border-color: rgba(120, 120, 130, 0.15) !important;
+}
+.process-row-direct::before {
+  background: var(--neon-gray);
+  box-shadow: 0 0 10px var(--neon-gray);
+}
+
+.process-row-block {
+  border: 1px solid rgba(255, 71, 87, 0.06) !important;
+}
+.process-row-block:hover {
+  border-color: rgba(255, 71, 87, 0.2) !important;
+}
+.process-row-block::before {
+  background: var(--neon-red);
+  box-shadow: 0 0 10px var(--neon-red);
+}
+
+/* Flash Animations */
+@keyframes flashGlow {
+  0% {
+    background-color: rgba(168, 85, 247, 0.2);
+    box-shadow: inset 0 0 15px rgba(168, 85, 247, 0.25);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.row-flash {
+  animation: flashGlow 0.4s ease-out;
+}
+
+/* Premium Glow Inputs */
+.glass-input {
+  background: rgba(0, 0, 0, 0.25) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  border-radius: 10px !important;
+  transition: all 0.2s ease !important;
+}
+
+.glass-input:focus, .glass-input:focus-within {
+  border-color: var(--neon-cyan) !important;
+  box-shadow: 0 0 0 1px var(--neon-cyan), 0 0 10px rgba(0, 240, 255, 0.25) !important;
+}
+
+/* Premium Candy Buttons */
+.candy-btn-primary {
+  background: linear-gradient(135deg, #7c3aed 0%, #00f0ff 100%) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  border: none !important;
+  box-shadow: 0 4px 15px rgba(0, 240, 255, 0.2) !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.2s ease !important;
+}
+.candy-btn-primary:hover {
+  box-shadow: 0 4px 25px rgba(0, 240, 255, 0.45) !important;
+  transform: translateY(-1px);
+}
+.candy-btn-primary:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.candy-btn-secondary {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  transition: all 0.2s ease !important;
+}
+.candy-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Progress bar moving shine effect */
+@keyframes glossShine {
+  0% { background-position: -200px 0; }
+  100% { background-position: 200px 0; }
+}
+
+.gloss-progress {
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.2) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200px 100%;
+  animation: glossShine 1.5s infinite linear;
+}
+
+/* Glass Status Chips */
+.glass-chip {
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border-radius: 9999px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Monospace text for logs and technical details */
+.technical-mono {
+  font-family: var(--font-mono);
+}
+
+/* Fix active NavLink text contrast on bright cyan background */
+.mantine-NavLink-root[data-active],
+.mantine-NavLink-root[data-active] * {
+  color: var(--bg-dark) !important;
+}
+
