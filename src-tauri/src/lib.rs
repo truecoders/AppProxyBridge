@@ -442,11 +442,22 @@ pub fn run() {
     // Set high process priority class to start early and prioritize processing packet streams
     set_high_priority();
 
+    #[tauri::command]
+    async fn write_string_to_file(path: String, content: String) -> Result<(), String> {
+        std::fs::write(path, content).map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    async fn read_string_from_file(path: String) -> Result<String, String> {
+        std::fs::read_to_string(path).map_err(|e| e.to_string())
+    }
+
     // Create global thread-safe state
     let engine_state = Arc::new(EngineState::new());
     let engine_state_clone = engine_state.clone();
     
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(engine_state) // Add to Tauri context
@@ -599,7 +610,9 @@ pub fn run() {
             set_process_group,
             get_app_logs,
             clear_app_logs,
-            restart_app
+            restart_app,
+            write_string_to_file,
+            read_string_from_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

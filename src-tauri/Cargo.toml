@@ -1,6 +1,6 @@
 [package]
 name = "appproxybridge"
-version = "0.6.0"
+version = "0.6.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -30,4 +30,5 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Netwo
 windivert = { version = "0.6.0", features = ["vendored"] }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 windivert-sys = "0.10.0"
+tauri-plugin-dialog = "2.0.0"
 

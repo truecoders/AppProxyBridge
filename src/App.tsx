@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { save, open } from "@tauri-apps/plugin-dialog";
+import { encryptData, decryptData } from "./crypto";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { check } from "@tauri-apps/plugin-updater";
@@ -388,6 +390,158 @@ function renderMarkdown(text: string): React.ReactNode {
 }
 
 function App() {
+
+  // --- EXPORT/IMPORT MODALS ---
+  const [exportModalOpened, setExportModalOpened] = useState(false);
+  const [importModalOpened, setImportModalOpened] = useState(false);
+  const [exportProxies, setExportProxies] = useState(true);
+  const [exportRules, setExportRules] = useState(true);
+  const [exportSettings, setExportSettings] = useState(true);
+  const [exportPassword, setExportPassword] = useState("");
+  
+  const [importPassword, setImportPassword] = useState("");
+  const [importFilePath, setImportFilePath] = useState("");
+  const [importDataPreview, setImportDataPreview] = useState<any>(null);
+  const [importProxies, setImportProxies] = useState(true);
+  const [importRules, setImportRules] = useState(true);
+  const [importSettingsCheck, setImportSettingsCheck] = useState(true);
+
+  const handleExport = async () => {
+    if (!exportPassword) {
+      showNotification("Пожалуйста, введите пароль для шифрования", "error");
+      return;
+    }
+    try {
+      const filePath = await save({
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!filePath) return;
+
+      const currentData: any = await invoke("get_saved_data");
+      
+      const dataToExport = {
+        proxies: exportProxies ? currentData.proxies : [],
+        rules: exportRules ? currentData.rules : [],
+        proxy_dns: exportSettings ? currentData.proxy_dns : false,
+        bypass_local: exportSettings ? currentData.bypass_local : false,
+        autostart: exportSettings ? currentData.autostart : false,
+        minimize_to_tray: exportSettings ? currentData.minimize_to_tray : false,
+        start_minimized: exportSettings ? currentData.start_minimized : false,
+        has_settings: exportSettings
+      };
+
+      const jsonStr = JSON.stringify(dataToExport);
+      const encrypted = await encryptData(jsonStr, exportPassword);
+      
+      await invoke("write_string_to_file", { path: filePath, content: encrypted });
+      showNotification("Настройки успешно экспортированы", "success");
+      setExportModalOpened(false);
+      setExportPassword("");
+    } catch (error: any) {
+      showNotification("Ошибка экспорта: " + error.toString(), "error");
+    }
+  };
+
+  const handleImportFileSelect = async () => {
+    try {
+      const filePath = await open({
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (filePath && !Array.isArray(filePath)) {
+        setImportFilePath(filePath as string);
+        setImportDataPreview(null);
+      }
+    } catch (e: any) {
+      showNotification("Ошибка выбора файла: " + e.toString(), "error");
+    }
+  };
+
+  const handleDecryptImport = async () => {
+    if (!importFilePath || !importPassword) return;
+    try {
+      const encrypted = await invoke<string>("read_string_from_file", { path: importFilePath });
+      const decrypted = await decryptData(encrypted, importPassword);
+      const data = JSON.parse(decrypted);
+      setImportDataPreview(data);
+      setImportProxies(data.proxies && data.proxies.length > 0);
+      setImportRules(data.rules && data.rules.length > 0);
+      setImportSettingsCheck(!!data.has_settings);
+    } catch (error: any) {
+      showNotification("Ошибка расшифровки: " + error.message, "error");
+    }
+  };
+
+  const handleExecuteImport = async () => {
+    if (!importDataPreview) return;
+    try {
+      let requiresRestart = false;
+      const currentData: any = await invoke("get_saved_data");
+
+      if (importProxies && importDataPreview.proxies) {
+        for (const p of importDataPreview.proxies) {
+          const isSame = currentData.proxies.some((cp: any) => 
+            cp.host === p.host && 
+            cp.port === p.port && 
+            cp.proxy_type === p.proxy_type && 
+            cp.username === p.username && 
+            cp.password === p.password
+          );
+          if (!isSame) {
+            let newP = { ...p };
+            if (currentData.proxies.some((cp: any) => cp.id === p.id)) {
+               newP.id = crypto.randomUUID();
+            }
+            await invoke("save_proxy", { proxy: newP });
+          }
+        }
+      }
+
+      if (importRules && importDataPreview.rules) {
+         let updatedRules = [...currentData.rules];
+         for (const r of importDataPreview.rules) {
+            const isSame = currentData.rules.some((cr: any) =>
+               cr.process_name === r.process_name && cr.action === r.action && cr.proxy_id === r.proxy_id
+            );
+            if (!isSame) {
+               let newR = { ...r };
+               if (currentData.rules.some((cr: any) => cr.id === r.id)) {
+                  newR.id = crypto.randomUUID();
+               }
+               updatedRules.push(newR);
+            }
+         }
+         await invoke("update_engine_rules", { rules: updatedRules });
+      }
+
+      if (importSettingsCheck && importDataPreview.has_settings) {
+         await invoke("save_routing_settings", { 
+           proxyDns: importDataPreview.proxy_dns ?? proxyDns, 
+           bypassLocal: importDataPreview.bypass_local ?? bypassLocal,
+           autostart: importDataPreview.autostart ?? autostart,
+           minimizeToTray: importDataPreview.minimize_to_tray ?? minimizeToTray,
+           startMinimized: importDataPreview.start_minimized ?? startMinimized
+         });
+         requiresRestart = true;
+      }
+
+      setImportModalOpened(false);
+      setImportDataPreview(null);
+      setImportPassword("");
+      setImportFilePath("");
+      showNotification("Импорт успешно завершен", "success");
+
+      if (requiresRestart) {
+         await invoke("restart_app");
+      } else {
+         const data: any = await invoke("get_saved_data");
+         setProxies(data.proxies);
+         setRules(data.rules);
+      }
+    } catch (e: any) {
+      showNotification("Ошибка импорта: " + e.toString(), "error");
+    }
+  };
+
   const [opened, { toggle }] = useDisclosure();
   const [activeTab, setActiveTab] = useState("dashboard");
 
@@ -422,7 +576,6 @@ function App() {
     const oneDay = 24 * 60 * 60 * 1000;
     const cachedTime = localStorage.getItem("github_releases_cache_time");
 
-    // Если обновление не принудительное, кэш свежий (< 24ч) и данные есть, не делаем запрос
     if (!force && cachedTime && (now - parseInt(cachedTime, 10) < oneDay) && releases.length > 0) {
       return;
     }
@@ -432,6 +585,9 @@ function App() {
     try {
       const response = await fetch("https://api.github.com/repos/truecoders/AppProxyBridge/releases");
       if (!response.ok) {
+        if (response.status === 403 || response.status === 429) {
+          throw new Error("Превышен лимит запросов к GitHub API. Пожалуйста, попробуйте позже.");
+        }
         let errorDetails = "";
         try {
           const errJson = await response.json();
@@ -3251,6 +3407,29 @@ function App() {
                   </Group>
                 </Card>
               </Stack>
+
+            {/* DATA MANAGEMENT */}
+            <Card shadow="sm" p="lg" radius="md" style={{ background: "rgba(11, 8, 19, 0.7)", border: "1px solid var(--glass-border)", backdropFilter: "blur(10px)" }}>
+              <Stack gap="md">
+                <Group justify="space-between" align="center">
+                  <Group gap="sm">
+                    <ThemeIcon size="lg" radius="md" variant="light" color="cyan">
+                      <IconSettings size={20} />
+                    </ThemeIcon>
+                    <Stack gap={0}>
+                      <Text fw={600} size="md" className="glow-text">Управление данными</Text>
+                      <Text size="xs" color="dimmed">Экспорт и импорт настроек (включая прокси и правила)</Text>
+                    </Stack>
+                  </Group>
+                </Group>
+                <Divider style={{ borderColor: 'var(--glass-border)' }} />
+                <Group>
+                   <Button variant="light" color="cyan" onClick={() => setExportModalOpened(true)}>Экспорт настроек</Button>
+                   <Button variant="light" color="violet" onClick={() => setImportModalOpened(true)}>Импорт настроек</Button>
+                </Group>
+              </Stack>
+            </Card>
+
             </Tabs.Panel>
 
             <Tabs.Panel value="changelog">
@@ -3356,6 +3535,45 @@ function App() {
           </Tabs>
         )}
       </AppShell.Main>
+
+      {/* EXPORT MODAL */}
+      <Modal opened={exportModalOpened} onClose={() => setExportModalOpened(false)} title="Экспорт данных" size="md">
+        <Stack gap="md">
+          <Checkbox label="Экспортировать прокси (включая пароли)" checked={exportProxies} onChange={(e) => setExportProxies(e.currentTarget.checked)} />
+          <Checkbox label="Экспортировать правила и исключения" checked={exportRules} onChange={(e) => setExportRules(e.currentTarget.checked)} />
+          <Checkbox label="Экспортировать общие настройки" checked={exportSettings} onChange={(e) => setExportSettings(e.currentTarget.checked)} />
+          <TextInput label="Пароль для шифрования (Обязательно)" placeholder="Введите пароль..." value={exportPassword} onChange={(e) => setExportPassword(e.currentTarget.value)} type="password" />
+          <Text size="xs" color="dimmed">Данные будут надежно зашифрованы алгоритмом AES-GCM. Запомните пароль, он понадобится для импорта.</Text>
+          <Button fullWidth color="cyan" onClick={handleExport} disabled={!exportPassword || (!exportProxies && !exportRules && !exportSettings)}>Экспортировать и сохранить файл</Button>
+        </Stack>
+      </Modal>
+
+      {/* IMPORT MODAL */}
+      <Modal opened={importModalOpened} onClose={() => { setImportModalOpened(false); setImportDataPreview(null); setImportFilePath(""); setImportPassword(""); }} title="Импорт данных" size="md">
+        <Stack gap="md">
+           {!importDataPreview ? (
+             <>
+               <Group>
+                 <Button variant="outline" onClick={handleImportFileSelect}>{importFilePath ? "Файл выбран" : "Выбрать файл..."}</Button>
+                 <Text size="xs" color="dimmed" style={{ flex: 1, wordBreak: "break-all" }}>{importFilePath}</Text>
+               </Group>
+               <TextInput label="Пароль" placeholder="Введите пароль от файла..." value={importPassword} onChange={(e) => setImportPassword(e.currentTarget.value)} type="password" />
+               <Button fullWidth color="violet" onClick={handleDecryptImport} disabled={!importFilePath || !importPassword}>Расшифровать</Button>
+             </>
+           ) : (
+             <>
+               <Text size="sm" fw={600} color="green">Файл успешно расшифрован!</Text>
+               <Text size="sm">Выберите, что именно импортировать:</Text>
+               <Checkbox label={`Прокси (${importDataPreview.proxies?.length || 0} шт.)`} checked={importProxies} onChange={(e) => setImportProxies(e.currentTarget.checked)} disabled={!importDataPreview.proxies?.length} />
+               <Checkbox label={`Правила (${importDataPreview.rules?.length || 0} шт.)`} checked={importRules} onChange={(e) => setImportRules(e.currentTarget.checked)} disabled={!importDataPreview.rules?.length} />
+               <Checkbox label="Общие настройки" checked={importSettingsCheck} onChange={(e) => setImportSettingsCheck(e.currentTarget.checked)} disabled={!importDataPreview.has_settings} />
+               <Text size="xs" color="yellow">При импорте общих настроек приложение будет перезапущено.</Text>
+               <Button fullWidth color="violet" onClick={handleExecuteImport} disabled={!importProxies && !importRules && !importSettingsCheck}>Начать импорт</Button>
+             </>
+           )}
+        </Stack>
+      </Modal>
+
     </AppShell>
   );
 }
