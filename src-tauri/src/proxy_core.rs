@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter};
 
 // Windows-specific imports
 use windows_sys::Win32::Foundation::{HANDLE, CloseHandle, FALSE};
+
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, GetExtendedUdpTable, TCP_TABLE_OWNER_PID_ALL, UDP_TABLE_OWNER_PID
 };
@@ -113,6 +114,7 @@ pub struct EngineState {
     pub autostart: Arc<AtomicBool>,
     pub minimize_to_tray: Arc<AtomicBool>,
     pub traffic_stats: TrafficStats, // Per-process accumulated traffic
+    pub active_windivert_handle: Arc<StdMutex<Option<usize>>>,
 }
 
 impl EngineState {
@@ -131,9 +133,12 @@ impl EngineState {
             autostart: Arc::new(AtomicBool::new(true)),
             minimize_to_tray: Arc::new(AtomicBool::new(true)),
             traffic_stats: Arc::new(StdMutex::new(HashMap::new())),
+            active_windivert_handle: Arc::new(StdMutex::new(None)),
         }
     }
 }
+
+
 
 /// Returns per-process traffic stats as a HashMap<String, (u64, u64, u64)>
 pub fn get_traffic_stats_snapshot(state: &EngineState) -> HashMap<String, (u64, u64, u64)> {
@@ -338,6 +343,16 @@ fn get_process_name_for_pid(pid: u32) -> String {
     format!("PID_{}", pid)
 }
 
+/// Forcefully closes the WinDivert handle to unblock handle.recv() immediately
+pub fn stop_windivert_handle(state: &EngineState) {
+    let mut active_h = state.active_windivert_handle.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(h) = active_h.take() {
+        unsafe {
+            let _ = windivert_sys::WinDivertClose(std::mem::transmute(h));
+        }
+    }
+}
+
 // Main packet process thread runner (synchronously opens handle, asynchronously processes)
 pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: std::path::PathBuf) -> Result<(), String> {
     let filter = "(outbound or inbound) and (tcp or udp) and !impostor";
@@ -348,6 +363,16 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
         }
     };
 
+    let raw_h: usize = unsafe { *(&handle as *const _ as *const usize) };
+
+    {
+        let mut active_h = state.active_windivert_handle.lock().unwrap_or_else(|e| e.into_inner());
+        *active_h = Some(raw_h);
+    }
+
+
+
+    state.running.store(true, Ordering::Relaxed);
     let running = state.running.clone();
     let state_clone = state.clone();
     let app_clone = app.clone();
@@ -399,6 +424,9 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                     }
                 }
                 Err(e) => {
+                    if !running.load(Ordering::Relaxed) {
+                        break;
+                    }
                     let msg = format!("WinDivert recv error: {:?}", e);
                     if let Ok(conn) = crate::database::init_db(db_path.clone()) {
                         let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
@@ -416,9 +444,13 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                 }
             }
         }
+
+        let mut active_h = state_clone.active_windivert_handle.lock().unwrap_or_else(|e| e.into_inner());
+        *active_h = None;
     });
 
     Ok(())
+
 }
 
 fn is_local_ip(ip: IpAddr) -> bool {

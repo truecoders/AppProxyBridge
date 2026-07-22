@@ -40,15 +40,30 @@ export async function encryptData(data: string, password: string): Promise<strin
   combined.set(iv, salt.length);
   combined.set(new Uint8Array(encrypted), salt.length + iv.length);
   
-  return btoa(String.fromCharCode(...combined));
+  return bytesToBase64(combined);
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK_SIZE = 0x8000; // 32KB chunks
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+    binary += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(base64Str: string): Uint8Array {
+  const binary = atob(base64Str);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 export async function decryptData(encryptedBase64: string, password: string): Promise<string> {
-  const combined = new Uint8Array(
-    atob(encryptedBase64)
-      .split("")
-      .map((c) => c.charCodeAt(0))
-  );
+  const combined = base64ToBytes(encryptedBase64);
 
   const salt = combined.slice(0, 16);
   const iv = combined.slice(16, 28);
@@ -68,3 +83,4 @@ export async function decryptData(encryptedBase64: string, password: string): Pr
     throw new Error("Неверный пароль или поврежденные данные");
   }
 }
+

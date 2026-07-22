@@ -435,7 +435,7 @@ function App() {
       const jsonStr = JSON.stringify(dataToExport);
       const encrypted = await encryptData(jsonStr, exportPassword);
       
-      await invoke("write_string_to_file", { path: filePath, content: encrypted });
+      await invoke("export_backup_file", { path: filePath, content: encrypted });
       showNotification("Настройки успешно экспортированы", "success");
       setExportModalOpened(false);
       setExportPassword("");
@@ -461,8 +461,9 @@ function App() {
   const handleDecryptImport = async () => {
     if (!importFilePath || !importPassword) return;
     try {
-      const encrypted = await invoke<string>("read_string_from_file", { path: importFilePath });
+      const encrypted = await invoke<string>("import_backup_file", { path: importFilePath });
       const decrypted = await decryptData(encrypted, importPassword);
+
       const data = JSON.parse(decrypted);
       setImportDataPreview(data);
       setImportProxies(data.proxies && data.proxies.length > 0);
