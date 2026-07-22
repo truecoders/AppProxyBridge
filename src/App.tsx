@@ -412,7 +412,9 @@ function App() {
       return;
     }
     try {
+      const today = new Date().toISOString().split("T")[0];
       const filePath = await save({
+        defaultPath: `AppProxyBridgeBackup_${today}.json`,
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
       if (!filePath) return;
@@ -583,10 +585,14 @@ function App() {
     setIsLoadingReleases(true);
     setReleasesError(null);
     try {
-      const response = await fetch("https://api.github.com/repos/truecoders/AppProxyBridge/releases");
+      const response = await fetch("https://api.github.com/repos/truecoders/AppProxyBridge/releases", {
+        headers: {
+          "Accept": "application/vnd.github.v3+json",
+        },
+      });
       if (!response.ok) {
         if (response.status === 403 || response.status === 429) {
-          throw new Error("Превышен лимит запросов к GitHub API. Пожалуйста, попробуйте позже.");
+          throw new Error("Превышен лимит запросов к GitHub API. Попробуйте включить прокси или повторить позже.");
         }
         let errorDetails = "";
         try {
@@ -598,15 +604,24 @@ function App() {
         throw new Error(`Код ${response.status}${errorDetails || (response.statusText ? ` - ${response.statusText}` : "")}`);
       }
       const data = await response.json();
-      setReleases(data);
-      localStorage.setItem("github_releases_cache", JSON.stringify(data));
-      localStorage.setItem("github_releases_cache_time", now.toString());
-    } catch (err: any) {
-      if (releases.length > 0) {
-        console.warn("Не удалось обновить список релизов с GitHub:", err.message);
-      } else {
-        setReleasesError(`Ошибка загрузки: ${err.message || "Не удалось загрузить историю изменений"}`);
+      if (Array.isArray(data)) {
+        setReleases(data);
+        localStorage.setItem("github_releases_cache", JSON.stringify(data));
+        localStorage.setItem("github_releases_cache_time", now.toString());
       }
+    } catch (err: any) {
+      const cached = localStorage.getItem("github_releases_cache");
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setReleases(parsed);
+            setReleasesError(null);
+            return;
+          }
+        } catch (_) {}
+      }
+      setReleasesError(`Ошибка загрузки: ${err.message || "Не удалось загрузить историю изменений"}`);
     } finally {
       setIsLoadingReleases(false);
     }

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::path::PathBuf;
-use tokio::net::{TcpListener, TcpStream};
+use std::time::Duration;
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
 use crate::proxy_core::{EngineState, LogEntry};
 use tauri::{AppHandle, Emitter};
@@ -184,7 +185,7 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle, db_path: P
                             }
                         }
                         Err(e) => {
-                             emit_log(&db_clone, &app_clone, "warn", "relay", &format!("Direct fallback connection failed to {}: {:?}", dest_addr, e), Some(&process_name));
+                              emit_log(&db_clone, &app_clone, "warn", "relay", &format!("Direct fallback connection failed to {}: {:?}", dest_addr, e), Some(&process_name));
                         }
                     }
                 }
@@ -193,19 +194,275 @@ pub async fn start_tcp_relay(state: Arc<EngineState>, app: AppHandle, db_path: P
     }
 }
 
-pub async fn start_udp_relay(state: Arc<EngineState>, _app: AppHandle, _db_path: PathBuf) {
-    // SOCKS5 UDP Associate relay implementation structure
+pub async fn start_udp_relay(state: Arc<EngineState>, app: AppHandle, db_path: PathBuf) {
     let running = state.running.clone();
-    let _addr = "0.0.0.0:34021";
+    let addr = "0.0.0.0:34021";
 
-    
-    // In a real SOCKS5 UDP setup, this would bind a UdpSocket,
-    // intercept UDP packets, wrap them in SOCKS5 UDP headers,
-    // and forward them via the SOCKS5 proxy UDP port.
+    let listener = match UdpSocket::bind(addr).await {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            emit_log(&db_path, &app, "error", "relay", &format!("Failed to bind UDP relay listener to {}: {:?}", addr, e), None);
+            return;
+        }
+    };
+
+    let mut buf = [0u8; 65535];
+
     while running.load(std::sync::atomic::Ordering::Relaxed) {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let (len, src_addr) = match listener.recv_from(&mut buf).await {
+            Ok(res) => res,
+            Err(_) => continue,
+        };
+
+        let packet_data = buf[..len].to_vec();
+        let client_port = src_addr.port();
+
+        let state_clone = state.clone();
+        let app_clone = app.clone();
+        let db_clone = db_path.clone();
+        let listener_clone = listener.clone();
+
+        tokio::spawn(async move {
+            let mapping = {
+                let redirect_table = state_clone.redirect_table.lock().await;
+                redirect_table.get(&client_port).cloned()
+            };
+
+            if let Some((dest_addr, proxy_id)) = mapping {
+                let proxy_config = {
+                    let config = state_clone.config.lock().await;
+                    config.iter().find(|p| p.id == proxy_id).cloned()
+                };
+
+                let (pid, process_name) = {
+                    let cache = state_clone.pid_cache.lock().await;
+                    if let Some(entry) = cache.get(&client_port) {
+                        (entry.pid, entry.process_name.clone())
+                    } else {
+                        (0, "Unknown".to_string())
+                    }
+                };
+
+                let connection_id = format!("{}:{}-{}:{}", process_name, client_port, dest_addr.ip(), dest_addr.port());
+
+                if let Some(cfg) = proxy_config {
+                    if cfg.proxy_type.to_uppercase() == "SOCKS5" {
+                        match socks5_udp_associate_and_send(&cfg, dest_addr, &packet_data).await {
+                            Ok(resp_payload) => {
+                                let _ = listener_clone.send_to(&resp_payload, src_addr).await;
+
+                                let conn_event = crate::proxy_core::ConnectionInfo {
+                                    id: connection_id,
+                                    pid,
+                                    process_name,
+                                    protocol: "UDP".to_string(),
+                                    source_addr: format!("127.0.0.1:{}", client_port),
+                                    original_dest: dest_addr.to_string(),
+                                    action: "Proxy".to_string(),
+                                    bytes_sent: packet_data.len() as u64,
+                                    bytes_received: resp_payload.len() as u64,
+                                    timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                                    status: "Proxied".to_string(),
+                                };
+                                let _ = app_clone.emit("connection-event", conn_event);
+                            }
+                            Err(err) => {
+                                emit_log(&db_clone, &app_clone, "error", "relay", &format!("UDP Associate proxy error for {}: {:?}", dest_addr, err), Some(&process_name));
+                            }
+                        }
+                    } else {
+                        // HTTP proxy or non-SOCKS5 fallback to direct
+                        match direct_udp_send_and_receive(dest_addr, &packet_data).await {
+                            Ok(resp_payload) => {
+                                let _ = listener_clone.send_to(&resp_payload, src_addr).await;
+
+                                let conn_event = crate::proxy_core::ConnectionInfo {
+                                    id: connection_id,
+                                    pid,
+                                    process_name,
+                                    protocol: "UDP".to_string(),
+                                    source_addr: format!("127.0.0.1:{}", client_port),
+                                    original_dest: dest_addr.to_string(),
+                                    action: "Direct".to_string(),
+                                    bytes_sent: packet_data.len() as u64,
+                                    bytes_received: resp_payload.len() as u64,
+                                    timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                                    status: "Active".to_string(),
+                                };
+                                let _ = app_clone.emit("connection-event", conn_event);
+                            }
+                            Err(err) => {
+                                emit_log(&db_clone, &app_clone, "warn", "relay", &format!("Direct UDP fallback error for {}: {:?}", dest_addr, err), Some(&process_name));
+                            }
+                        }
+                    }
+                } else {
+                    // No proxy config, direct fallback
+                    match direct_udp_send_and_receive(dest_addr, &packet_data).await {
+                        Ok(resp_payload) => {
+                            let _ = listener_clone.send_to(&resp_payload, src_addr).await;
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+        });
     }
 }
+
+async fn socks5_udp_associate_and_send(
+    cfg: &crate::proxy_core::ProxyConfig,
+    dest_addr: std::net::SocketAddr,
+    payload: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let proxy_addr = format!("{}:{}", cfg.host, cfg.port);
+    let mut proxy_tcp = TcpStream::connect(&proxy_addr).await?;
+
+    // 1. SOCKS5 Greeting
+    let greeting = vec![0x05, 0x02, 0x00, 0x02];
+    proxy_tcp.write_all(&greeting).await?;
+    let mut response = [0u8; 2];
+    proxy_tcp.read_exact(&mut response).await?;
+    if response[0] != 0x05 {
+        return Err("Invalid SOCKS version in greeting response".into());
+    }
+
+    let auth_method = response[1];
+    if auth_method == 0x02 {
+        let user = cfg.username.as_deref().unwrap_or("");
+        let pass = cfg.password.as_deref().unwrap_or("");
+        let mut auth_req = vec![0x01];
+        auth_req.push(user.len() as u8);
+        auth_req.extend_from_slice(user.as_bytes());
+        auth_req.push(pass.len() as u8);
+        auth_req.extend_from_slice(pass.as_bytes());
+        proxy_tcp.write_all(&auth_req).await?;
+
+        let mut auth_resp = [0u8; 2];
+        proxy_tcp.read_exact(&mut auth_resp).await?;
+        if auth_resp[1] != 0x00 {
+            return Err("SOCKS5 Authentication failed".into());
+        }
+    } else if auth_method != 0x00 {
+        return Err(format!("Unsupported SOCKS5 auth method: {}", auth_method).into());
+    }
+
+    // 2. SOCKS5 UDP ASSOCIATE Request (CMD = 0x03)
+    let udp_assoc_req = [0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
+    proxy_tcp.write_all(&udp_assoc_req).await?;
+
+    // 3. Read SOCKS5 Response header (4 bytes)
+    let mut resp_hdr = [0u8; 4];
+    proxy_tcp.read_exact(&mut resp_hdr).await?;
+    if resp_hdr[0] != 0x05 {
+        return Err("Invalid SOCKS version in UDP ASSOCIATE response".into());
+    }
+    if resp_hdr[1] != 0x00 {
+        return Err(format!("SOCKS5 UDP ASSOCIATE failed with rep code: {}", resp_hdr[1]).into());
+    }
+
+    let atyp = resp_hdr[3];
+    let relay_ip: std::net::IpAddr = match atyp {
+        0x01 => {
+            let mut ip_bytes = [0u8; 4];
+            proxy_tcp.read_exact(&mut ip_bytes).await?;
+            std::net::IpAddr::V4(std::net::Ipv4Addr::from(ip_bytes))
+        }
+        0x03 => {
+            let mut len_byte = [0u8; 1];
+            proxy_tcp.read_exact(&mut len_byte).await?;
+            let domain_len = len_byte[0] as usize;
+            let mut domain_bytes = vec![0u8; domain_len];
+            proxy_tcp.read_exact(&mut domain_bytes).await?;
+            let domain_str = String::from_utf8_lossy(&domain_bytes);
+            let resolved = tokio::net::lookup_host(format!("{}:0", domain_str)).await?;
+            resolved.into_iter().next().map(|s| s.ip()).ok_or("Failed to resolve relay domain")?
+        }
+        0x04 => {
+            let mut ip_bytes = [0u8; 16];
+            proxy_tcp.read_exact(&mut ip_bytes).await?;
+            std::net::IpAddr::V6(std::net::Ipv6Addr::from(ip_bytes))
+        }
+        _ => return Err("Invalid ATYP in UDP ASSOCIATE response".into()),
+    };
+
+    let mut port_bytes = [0u8; 2];
+    proxy_tcp.read_exact(&mut port_bytes).await?;
+    let relay_port = u16::from_be_bytes(port_bytes);
+
+    let actual_relay_ip = if relay_ip.is_unspecified() {
+        proxy_tcp.peer_addr()?.ip()
+    } else {
+        relay_ip
+    };
+    let relay_socket_addr = std::net::SocketAddr::new(actual_relay_ip, relay_port);
+
+    // 4. Bind local UdpSocket
+    let local_udp = UdpSocket::bind("0.0.0.0:0").await?;
+
+    // 5. Construct SOCKS5 UDP Header (RFC 1928)
+    let mut socks5_udp_pkt = vec![0x00, 0x00, 0x00];
+    match dest_addr.ip() {
+        std::net::IpAddr::V4(v4) => {
+            socks5_udp_pkt.push(0x01);
+            socks5_udp_pkt.extend_from_slice(&v4.octets());
+        }
+        std::net::IpAddr::V6(v6) => {
+            socks5_udp_pkt.push(0x04);
+            socks5_udp_pkt.extend_from_slice(&v6.octets());
+        }
+    }
+    socks5_udp_pkt.extend_from_slice(&dest_addr.port().to_be_bytes());
+    socks5_udp_pkt.extend_from_slice(payload);
+
+    local_udp.send_to(&socks5_udp_pkt, relay_socket_addr).await?;
+
+    // 6. Receive response datagram from SOCKS5 relay
+    let mut resp_buf = [0u8; 65535];
+    let (n, _from) = tokio::time::timeout(
+        Duration::from_secs(5),
+        local_udp.recv_from(&mut resp_buf),
+    ).await??;
+
+    if n < 10 {
+        return Err("SOCKS5 UDP response too short".into());
+    }
+    let resp_atyp = resp_buf[3];
+    let header_len = match resp_atyp {
+        0x01 => 10,
+        0x03 => {
+            let domain_len = resp_buf[4] as usize;
+            2 + 1 + 1 + 1 + domain_len + 2
+        }
+        0x04 => 22,
+        _ => return Err("Invalid ATYP in SOCKS5 UDP response header".into()),
+    };
+
+    if n < header_len {
+        return Err("Truncated SOCKS5 UDP response header".into());
+    }
+
+    drop(proxy_tcp);
+
+    Ok(resp_buf[header_len..n].to_vec())
+}
+
+async fn direct_udp_send_and_receive(
+    dest_addr: std::net::SocketAddr,
+    payload: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let local_udp = UdpSocket::bind("0.0.0.0:0").await?;
+    local_udp.send_to(payload, dest_addr).await?;
+
+    let mut resp_buf = [0u8; 65535];
+    let (n, _from) = tokio::time::timeout(
+        Duration::from_secs(5),
+        local_udp.recv_from(&mut resp_buf),
+    ).await??;
+
+    Ok(resp_buf[..n].to_vec())
+}
+
 
 // Perform proxy protocol handshake (SOCKS5 or HTTP CONNECT)
 async fn perform_proxy_handshake(
