@@ -380,6 +380,10 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
     // Run packet capture synchronously on the blocking thread to prevent lifetime/borrowing issues
     tokio::task::spawn_blocking(move || {
         let mut packet_buffer = vec![0u8; 65535];
+        let mut last_send_err_time = std::time::Instant::now() - std::time::Duration::from_secs(10);
+        let mut send_err_count = 0u64;
+        let mut last_recv_err_time = std::time::Instant::now() - std::time::Duration::from_secs(10);
+        let mut recv_err_count = 0u64;
         
         while running.load(Ordering::Relaxed) {
             match handle.recv(Some(&mut packet_buffer)) {
@@ -390,19 +394,31 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                             if reinject {
                                 // Re-inject the packet (modified or unmodified)
                                 if let Err(e) = handle.send(&packet) {
-                                    let msg = format!("WinDivert send error: {:?}", e);
-                                    if let Ok(conn) = crate::database::init_db(db_path.clone()) {
-                                        let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
+                                    send_err_count += 1;
+                                    if last_send_err_time.elapsed() >= std::time::Duration::from_secs(2) {
+                                        let msg = if send_err_count > 1 {
+                                            format!("WinDivert send error: {:?} (repeated {} times)", e, send_err_count)
+                                        } else {
+                                            format!("WinDivert send error: {:?}", e)
+                                        };
+                                        send_err_count = 0;
+                                        last_send_err_time = std::time::Instant::now();
+
+                                        if let Ok(conn) = crate::database::init_db(db_path.clone()) {
+                                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
+                                        }
+                                        let log_entry = LogEntry {
+                                            id: 0,
+                                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                                            level: "error".to_string(),
+                                            source: "windivert".to_string(),
+                                            message: msg,
+                                            process_name: None,
+                                        };
+                                        let _ = app_clone.emit("log-event", log_entry);
                                     }
-                                    let log_entry = LogEntry {
-                                        id: 0,
-                                        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
-                                        level: "error".to_string(),
-                                        source: "windivert".to_string(),
-                                        message: msg,
-                                        process_name: None,
-                                    };
-                                    let _ = app_clone.emit("log-event", log_entry);
+                                } else {
+                                    send_err_count = 0;
                                 }
                             }
                         }
@@ -427,19 +443,29 @@ pub fn start_windivert_loop(state: Arc<EngineState>, app: AppHandle, db_path: st
                     if !running.load(Ordering::Relaxed) {
                         break;
                     }
-                    let msg = format!("WinDivert recv error: {:?}", e);
-                    if let Ok(conn) = crate::database::init_db(db_path.clone()) {
-                        let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
+                    recv_err_count += 1;
+                    if last_recv_err_time.elapsed() >= std::time::Duration::from_secs(2) {
+                        let msg = if recv_err_count > 1 {
+                            format!("WinDivert recv error: {:?} (repeated {} times)", e, recv_err_count)
+                        } else {
+                            format!("WinDivert recv error: {:?}", e)
+                        };
+                        recv_err_count = 0;
+                        last_recv_err_time = std::time::Instant::now();
+
+                        if let Ok(conn) = crate::database::init_db(db_path.clone()) {
+                            let _ = crate::database::insert_log(&conn, "error", "windivert", &msg, None);
+                        }
+                        let log_entry = LogEntry {
+                            id: 0,
+                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                            level: "error".to_string(),
+                            source: "windivert".to_string(),
+                            message: msg,
+                            process_name: None,
+                        };
+                        let _ = app_clone.emit("log-event", log_entry);
                     }
-                    let log_entry = LogEntry {
-                        id: 0,
-                        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
-                        level: "error".to_string(),
-                        source: "windivert".to_string(),
-                        message: msg,
-                        process_name: None,
-                    };
-                    let _ = app_clone.emit("log-event", log_entry);
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
             }

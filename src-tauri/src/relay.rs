@@ -579,7 +579,8 @@ async fn perform_proxy_handshake(
 
         let resp_str = String::from_utf8_lossy(&response);
         if !resp_str.contains(" 200 ") {
-            return Err(format!("HTTP CONNECT failed: {}", resp_str.trim()).into());
+            let first_line = resp_str.lines().next().unwrap_or(resp_str.trim());
+            return Err(format!("HTTP CONNECT failed: {}", first_line.trim()).into());
         }
     }
 
